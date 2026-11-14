@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PBL 讨论助手</title>
-<link rel="stylesheet" href="/ui/style.css?v=5">
+<link rel="stylesheet" href="/ui/style.css?v=6">
 </head>
 <body>
 
@@ -60,6 +60,10 @@
         <input id="team-input" type="text" maxlength="64" placeholder="如：第三小组">
       </div>
       <div class="case-list" id="case-list"></div>
+      <div class="import-entry">
+        <button class="btn-text btn-glass" onclick="openImport()">＋ 导入案例</button>
+        <span class="import-hint">支持 Word / PPT / 图片，按幕次标题自动切分</span>
+      </div>
       <p class="picker-note">开始后自动发放第一幕。点击麦克风即可围坐讨论，导师只在值得介入时开口。</p>
     </div>
   </section>
@@ -207,6 +211,32 @@
   </div>
 </div>
 
-<script src="/ui/app.js?v=7"></script>
+<!-- ============ 导入案例 ============ -->
+<div id="import-modal" class="modal-mask hidden">
+  <div class="modal modal-wide">
+    <div class="modal-head">
+      <span>导入案例</span>
+      <button class="modal-close" onclick="closeImport()">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">选择文件（可多选）</label>
+      <input id="import-files" type="file" multiple
+             accept=".docx,.doc,.pptx,.ppt,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff">
+      <div class="field-tip">
+        Word/PPT 用「第一幕 / 第二幕 / Act 1」作标题自动切幕；没有幕次标题时 Word 按标题 1、PPT 按页拆分。
+        支持旧版 .doc/.ppt 和单独上传图片。
+      </div>
+      <div id="import-preview" class="import-preview hidden"></div>
+      <div id="import-error" class="test-result fail hidden"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-text" onclick="closeImport()">取消</button>
+      <button class="btn-text" id="import-parse-btn" onclick="parseImportFiles()">解析</button>
+      <button class="btn-primary" id="import-confirm-btn" onclick="confirmImport()" disabled>确认导入</button>
+    </div>
+  </div>
+</div>
+
+<script src="/ui/app.js?v=8"></script>
 </body>
 </html>

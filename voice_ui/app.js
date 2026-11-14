@@ -86,7 +86,7 @@ async function loadCases() {
   const list = $('case-list');
   list.innerHTML = data.cases.map((c) => `
     <div class="case-item" data-case="${esc(c.case_id)}" onclick="startDiscussion('${esc(c.case_id)}')">
-      <div class="case-name">${esc(c.title)}</div>
+      <div class="case-name">${esc(c.title)}${c.source === 'imported' ? ' <span class="case-badge">导入</span>' : ''}</div>
       <div class="case-desc">${esc(c.course)} · 难度 ${esc(c.difficulty)} · 约 ${c.estimated_minutes} 分钟 · ${c.act_count} 幕</div>
     </div>`).join('');
   setConn(data.engine || '');
@@ -159,9 +159,11 @@ async function refreshAll() {
 function renderCase() {
   if (!state.caseData) return;
   const acts = state.caseData.acts.slice(0, state.releasedActs);
-  $('case-body').innerHTML = acts.map((a) =>
-    `<div><b style="color:#E8EDF7;">${esc(a.title)}</b>\n${esc(a.presentation)}</div>`
-  ).join('<div style="height:8px"></div>');
+  $('case-body').innerHTML = acts.map((a) => {
+    const imgs = (a.images || []).map((u) =>
+      `<div class="case-figure"><img src="${esc(u)}" loading="lazy" alt=""></div>`).join('');
+    return `<div><b style="color:#E8EDF7;">${esc(a.title)}</b>\n${fmt(a.presentation)}${imgs}</div>`;
+  }).join('<div style="height:8px"></div>');
   $('case-toggle').textContent = '案例正文（' + acts.length + ' 幕）';
 }
 
@@ -778,6 +780,108 @@ async function testConnection() {
   }
 }
 
+/* ================= 案例导入 ================= */
+let importDraft = null;
+
+function openImport() {
+  importDraft = null;
+  $('import-files').value = '';
+  $('import-preview').classList.add('hidden');
+  $('import-preview').innerHTML = '';
+  $('import-error').classList.add('hidden');
+  $('import-confirm-btn').disabled = true;
+  $('import-parse-btn').disabled = false;
+  $('import-parse-btn').textContent = '解析';
+  $('import-modal').classList.remove('hidden');
+}
+
+function closeImport() {
+  $('import-modal').classList.add('hidden');
+}
+
+function importError(msg) {
+  const box = $('import-error');
+  box.textContent = msg;
+  box.classList.remove('hidden');
+}
+
+async function parseImportFiles() {
+  const input = $('import-files');
+  if (!input.files || !input.files.length) {
+    toast('请先选择文件');
+    return;
+  }
+  const btn = $('import-parse-btn');
+  btn.disabled = true;
+  btn.textContent = '解析中…';
+  $('import-error').classList.add('hidden');
+  $('import-preview').classList.add('hidden');
+  $('import-confirm-btn').disabled = true;
+
+  const fd = new FormData();
+  for (const f of input.files) fd.append('files', f);
+  try {
+    const res = await fetch('/api/cases/parse', { method: 'POST', body: fd });
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      data = { ok: false, error: `服务异常（HTTP ${res.status}）` };
+    }
+    if (!data.ok) throw new Error(data.error || '解析失败');
+    importDraft = data;
+    renderImportPreview(data.case || {}, data.warnings || []);
+    $('import-confirm-btn').disabled = false;
+  } catch (e) {
+    importError(e.message || '解析失败');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '解析';
+  }
+}
+
+function renderImportPreview(c, warnings) {
+  const acts = (c.acts || []).map((a) => {
+    const text = a.presentation || '';
+    const thumbs = (a.images || []).map((u) =>
+      `<img src="${esc(u)}" loading="lazy" alt="">`).join('');
+    return `<div class="import-act">
+      <div class="import-act-head">
+        <span>${esc(a.title || '未命名幕')}</span>
+        <span>${text.length} 字 · ${(a.discussion_prompts || []).length} 个问题 · ${(a.images || []).length} 张图</span>
+      </div>
+      <div class="import-act-body">${esc(text.slice(0, 140))}${text.length > 140 ? '…' : ''}</div>
+      ${thumbs ? `<div class="import-thumbs">${thumbs}</div>` : ''}
+    </div>`;
+  }).join('');
+  const warn = (warnings && warnings.length)
+    ? `<div class="import-warn">${warnings.map(esc).join('<br>')}</div>` : '';
+  $('import-preview').innerHTML = `
+    <div class="import-summary"><b>${esc(c.title || '导入案例')}</b> · ${esc(c.course || '')} · ${(c.acts || []).length} 幕</div>
+    ${warn}
+    <div class="import-acts">${acts}</div>`;
+  $('import-preview').classList.remove('hidden');
+}
+
+async function confirmImport() {
+  if (!importDraft) return;
+  const btn = $('import-confirm-btn');
+  btn.disabled = true;
+  btn.textContent = '导入中…';
+  try {
+    const data = await api('/api/cases/confirm', { draft_id: importDraft.draft_id });
+    if (!data.ok) throw new Error(data.error || '导入失败');
+    toast('案例已导入');
+    closeImport();
+    await loadCases();
+  } catch (e) {
+    importError(e.message || '导入失败');
+    btn.disabled = false;
+  } finally {
+    btn.textContent = '确认导入';
+  }
+}
+
 /* ================= 启动 ================= */
 (function init() {
   loadCases();
@@ -797,6 +901,10 @@ async function testConnection() {
   $('release-btn').addEventListener('click', releaseAct);
   $('export-btn').addEventListener('click', exportMinutes);
   $('settings-btn').addEventListener('click', openSettings);
+  $('import-files').addEventListener('change', () => {
+    $('import-confirm-btn').disabled = true;
+    $('import-preview').classList.add('hidden');
+  });
   $('say-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendSay();
   });

@@ -22,15 +22,18 @@ RealTalk 语音适配：
 
 import os
 import sys
+import re
 import json
 import time
 import uuid
+import shutil
 import sqlite3
 import datetime
+import tempfile
 from pathlib import Path
 from contextlib import contextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, File, UploadFile
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -46,6 +49,13 @@ from core.llm_client import load_config, mask_key, save_config, test_connection,
 DB_PATH = ROOT / "data" / "voice.sqlite"
 REPORTS_DIR = ROOT / "reports"
 UI_DIR = ROOT / "voice_ui"
+MEDIA_DIR = ROOT / "data" / "media"
+IMPORTS_DIR = ROOT / "data" / "imports"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+IMPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# 导入案例内存缓存：case_id -> case dict
+IMPORTED_CASES = {}
 
 app = FastAPI(title="PBL 语音讨论助手")
 
@@ -123,6 +133,14 @@ def init_db():
         source TEXT DEFAULT 'ai',
         created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS cases (
+        case_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        course TEXT DEFAULT '',
+        data TEXT NOT NULL,
+        source TEXT DEFAULT 'import',
+        created_at TEXT NOT NULL
+    );
     """)
     # 旧库迁移：补充 detail 列（已存在则忽略）
     try:
@@ -158,7 +176,49 @@ def find_case(case_id):
     for c in PBL_CASES:
         if c["case_id"] == case_id:
             return c
-    return None
+    return IMPORTED_CASES.get(case_id)
+
+
+def load_imported_cases():
+    """把库里已确认的导入案例加载进内存缓存。"""
+    IMPORTED_CASES.clear()
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT case_id, data FROM cases ORDER BY created_at DESC").fetchall()
+    for row in rows:
+        try:
+            IMPORTED_CASES[row["case_id"]] = json.loads(row["data"])
+        except Exception:
+            pass
+
+
+def cleanup_imports(max_age_seconds=24 * 3600):
+    """清理超时的导入草稿和孤儿媒体目录。"""
+    cutoff = time.time() - max_age_seconds
+    try:
+        for p in IMPORTS_DIR.glob("*.json"):
+            try:
+                if p.stat().st_mtime >= cutoff:
+                    continue
+                cid = p.stem
+                p.unlink(missing_ok=True)
+                if cid not in IMPORTED_CASES:
+                    shutil.rmtree(MEDIA_DIR / cid, ignore_errors=True)
+            except Exception:
+                continue
+        for d in MEDIA_DIR.iterdir():
+            try:
+                if (d.is_dir() and d.name not in IMPORTED_CASES
+                        and d.stat().st_mtime < cutoff):
+                    shutil.rmtree(d, ignore_errors=True)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+load_imported_cases()
+cleanup_imports()
 
 
 def get_session(conn, token):
@@ -662,8 +722,160 @@ def cases():
             "estimated_minutes": c["estimated_minutes"],
             "act_count": len(c["acts"]),
             "objectives": c["learning_objectives"],
+            "source": "builtin",
+        })
+    for c in sorted(IMPORTED_CASES.values(), key=lambda x: x.get("case_id", ""),
+                    reverse=True):
+        out.append({
+            "case_id": c["case_id"],
+            "title": c.get("title", "导入案例"),
+            "course": c.get("course", ""),
+            "difficulty": c.get("difficulty", ""),
+            "estimated_minutes": c.get("estimated_minutes", 45),
+            "act_count": len(c.get("acts", [])),
+            "objectives": c.get("learning_objectives", []),
+            "source": "imported",
         })
     return {"ok": True, "cases": out, "engine": engine_label()}
+
+
+# ============================================================
+# API：案例导入（Word / PPT / 图片）
+# ============================================================
+
+MAX_IMPORT_FILES = 10
+MAX_IMPORT_BYTES = 20 * 1024 * 1024
+
+
+def _new_import_case_id():
+    for _ in range(20):
+        cid = "IMP-{}-{}".format(datetime.datetime.now().strftime("%Y%m%d"),
+                                 uuid.uuid4().hex[:6])
+        if not find_case(cid):
+            return cid
+    raise RuntimeError("无法生成案例编号")
+
+
+def _read_uploads(files, allowed_exts):
+    if not files:
+        raise ValueError("请选择要导入的文件")
+    if len(files) > MAX_IMPORT_FILES:
+        raise ValueError("一次最多上传 {} 个文件".format(MAX_IMPORT_FILES))
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="pbl_upload_"))
+    items = []
+    total = 0
+    try:
+        for idx, f in enumerate(files):
+            name = f.filename or "file"
+            ext = Path(name).suffix.lower()
+            if ext not in allowed_exts:
+                raise ValueError("不支持的文件格式：{}".format(name))
+            chunks = []
+            size = 0
+            while True:
+                chunk = f.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                total += len(chunk)
+                if total > MAX_IMPORT_BYTES:
+                    raise ValueError("文件总大小不能超过 20MB")
+                chunks.append(chunk)
+            data = b"".join(chunks)
+            if not data:
+                raise ValueError("文件为空：{}".format(name))
+            dst = tmpdir / "{}_{}{}".format(idx, uuid.uuid4().hex[:6], ext)
+            dst.write_bytes(data)
+            items.append({"filename": name, "path": str(dst)})
+    except Exception:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
+    return tmpdir, items
+
+
+@app.post("/api/cases/parse")
+def import_parse(files: list[UploadFile] = File(...)):
+    """上传 Word/PPT/图片，解析成案例草稿（不直接入库）。"""
+    try:
+        from core.importer import parse_import_files, DOC_EXTS, IMAGE_EXTS
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "error": "导入组件不可用：{}".format(e)},
+            status_code=500)
+
+    tmpdir = None
+    case_id = None
+    try:
+        tmpdir, items = _read_uploads(files, DOC_EXTS | IMAGE_EXTS)
+        case_id = _new_import_case_id()
+        case, warnings = parse_import_files(items, case_id, MEDIA_DIR)
+        draft = {"case": case, "warnings": warnings, "created_at": now_str()}
+        (IMPORTS_DIR / (case_id + ".json")).write_text(
+            json.dumps(draft, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "draft_id": case_id, "case": case,
+                "warnings": warnings}
+    except (ValueError, RuntimeError) as e:
+        if case_id:
+            shutil.rmtree(MEDIA_DIR / case_id, ignore_errors=True)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    except Exception as e:
+        if case_id:
+            shutil.rmtree(MEDIA_DIR / case_id, ignore_errors=True)
+        return JSONResponse(
+            {"ok": False, "error": "解析失败：{}: {}".format(type(e).__name__, e)},
+            status_code=500)
+    finally:
+        if tmpdir is not None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.post("/api/cases/confirm")
+async def import_confirm(payload: dict):
+    """确认草稿，写入案例库。"""
+    draft_id = (payload.get("draft_id") or "").strip()
+    if not re.match(r"^IMP-[A-Za-z0-9-]{4,64}$", draft_id):
+        return JSONResponse({"ok": False, "error": "草稿编号无效"},
+                            status_code=400)
+    draft_path = IMPORTS_DIR / (draft_id + ".json")
+    if not draft_path.exists():
+        return JSONResponse({"ok": False, "error": "草稿不存在或已过期"},
+                            status_code=404)
+    try:
+        draft = json.loads(draft_path.read_text(encoding="utf-8"))
+    except Exception:
+        return JSONResponse({"ok": False, "error": "草稿损坏，请重新上传"},
+                            status_code=400)
+
+    case = draft.get("case") or {}
+    if not case.get("acts"):
+        return JSONResponse({"ok": False, "error": "草稿中没有有效幕次"},
+                            status_code=400)
+    case["case_id"] = draft_id
+
+    with db() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO cases (case_id, title, course, data, source, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (draft_id, case.get("title", "导入案例"), case.get("course", ""),
+             json.dumps(case, ensure_ascii=False), "import", now_str()))
+    IMPORTED_CASES[draft_id] = case
+    draft_path.unlink(missing_ok=True)
+
+    return {
+        "ok": True,
+        "case": {
+            "case_id": draft_id,
+            "title": case.get("title", "导入案例"),
+            "course": case.get("course", ""),
+            "difficulty": case.get("difficulty", ""),
+            "estimated_minutes": case.get("estimated_minutes", 45),
+            "act_count": len(case.get("acts", [])),
+            "objectives": case.get("learning_objectives", []),
+            "source": "imported",
+        },
+        "warnings": draft.get("warnings", []),
+    }
 
 
 @app.post("/api/start")
@@ -1302,6 +1514,7 @@ async def ws_voice(ws: WebSocket, token: str):
 # 静态页面
 # ============================================================
 
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
 app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
 
 

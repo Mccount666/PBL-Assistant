@@ -20,9 +20,12 @@ if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq python3 python3-venv python3-pip curl >/dev/null
+  # 旧版 .doc/.ppt 导入需要 LibreOffice；安装失败不影响 .docx/.pptx
+  apt-get install -y -qq --no-install-recommends libreoffice-writer libreoffice-impress >/dev/null || true
 elif command -v yum >/dev/null 2>&1; then
   echo "[1/6] 安装系统依赖 (yum)..."
   yum install -y -q python3 python3-pip curl >/dev/null
+  yum install -y -q libreoffice-writer libreoffice-impress >/dev/null || true
 else
   echo "!! 未识别的包管理器，请手动安装 python3 / python3-venv"
   exit 1
@@ -43,6 +46,9 @@ if [ ! -d "$APP_DIR/venv" ]; then
 fi
 "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/requirements-server.txt"
+if ! command -v soffice >/dev/null 2>&1; then
+  echo "    ⚠️  未检测到 LibreOffice，.doc/.ppt 旧格式将无法导入（.docx/.pptx 不受影响）"
+fi
 
 # ---------- 4. 防火墙（本机） ----------
 echo "[4/6] 检查本机防火墙..."
