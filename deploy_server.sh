@@ -69,7 +69,7 @@ Type=simple
 WorkingDirectory=${APP_DIR}
 Environment=PYTHONIOENCODING=utf-8
 Environment=PYTHONUNBUFFERED=1
-ExecStart=${APP_DIR}/venv/bin/uvicorn voice_server:app --host 0.0.0.0 --port ${PORT} --proxy-headers
+ExecStart=${APP_DIR}/venv/bin/uvicorn voice_server:app --host 127.0.0.1 --port ${PORT} --proxy-headers
 Restart=always
 RestartSec=3
 StandardOutput=journal
