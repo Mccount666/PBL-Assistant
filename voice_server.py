@@ -41,7 +41,7 @@ from cases.case_data import PBL_CASES, KNOWLEDGE_BASE
 from core.discussion_coach import DiscussionCoach
 from core.board import STATUS_LABELS, STATUS_ICONS
 from core.report import generate_minutes
-from core.llm_client import load_config, mask_key, save_config, test_connection
+from core.llm_client import load_config, mask_key, save_config, test_connection, utility_models
 
 DB_PATH = ROOT / "data" / "voice.sqlite"
 REPORTS_DIR = ROOT / "reports"
@@ -379,9 +379,7 @@ KNOWLEDGE_PROMPT = (
 # 节流：每个会话最多每 20 秒提炼一次
 _last_knowledge_ts = {}
 
-# 知识点提取专用模型（轻量、快、便宜；推理型主模型不适合这种结构化提取）
-EXTRACT_MODEL = "step-1o-turbo-vision"
-EXTRACT_FALLBACK_MODELS = ["step-1o-turbo-vision", "step-3.5-flash"]
+# 知识点提取使用「辅助模型」（config.utility_model，留空则用主模型）
 
 
 def extract_knowledge_llm(text, cfg):
@@ -390,7 +388,7 @@ def extract_knowledge_llm(text, cfg):
     if cfg.get("mode") == "api" and cfg.get("api_key"):
         from core.llm_client import chat
         import re
-        for model in EXTRACT_FALLBACK_MODELS:
+        for model in utility_models(cfg):
             ecfg = dict(cfg)
             ecfg["model"] = model
             ecfg["max_tokens"] = 900
@@ -552,6 +550,7 @@ def get_settings():
         "mode": cfg.get("mode"),
         "api_base": cfg.get("api_base"),
         "model": cfg.get("model"),
+        "utility_model": cfg.get("utility_model", ""),
         "has_key": bool(cfg.get("api_key")),
         "key_masked": mask_key(cfg.get("api_key", "")),
     }
@@ -565,14 +564,18 @@ async def post_settings(payload: dict):
     api_key 留空表示保留原 Key；传 "__clear__" 表示清除。
     """
     updates = {}
-    api_base = (payload.get("api_base") or "").strip()
+    # 兼容两种前端字段名：api_base/base_url、api_key/key
+    api_base = (payload.get("api_base") or payload.get("base_url") or "").strip()
     model = (payload.get("model") or "").strip()
-    api_key = (payload.get("api_key") or "").strip()
+    api_key = (payload.get("api_key") or payload.get("key") or "").strip()
 
     if api_base:
         updates["api_base"] = api_base
     if model:
         updates["model"] = model
+    # 辅助模型允许清空（回退到主模型）
+    if "utility_model" in payload:
+        updates["utility_model"] = (payload.get("utility_model") or "").strip()
     if api_key:
         if api_key == "__clear__":
             updates["api_key"] = ""
@@ -587,6 +590,7 @@ async def post_settings(payload: dict):
         "mode": cfg.get("mode"),
         "api_base": cfg.get("api_base"),
         "model": cfg.get("model"),
+        "utility_model": cfg.get("utility_model", ""),
         "has_key": bool(cfg.get("api_key")),
         "key_masked": mask_key(cfg.get("api_key", "")),
         "engine": engine_label(),

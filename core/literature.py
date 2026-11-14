@@ -64,10 +64,10 @@ def _to_english_query(topic, cfg):
     if cfg.get("mode") != "api" or not cfg.get("api_key"):
         return topic
     try:
-        from core.llm_client import chat
+        from core.llm_client import chat, utility_models
         ecfg = dict(cfg)
-        # 用非推理轻量模型（推理模型的思考过程会污染输出）
-        ecfg["model"] = "step-1o-turbo-vision"
+        # 用辅助模型（配置项 utility_model；推理模型的思考过程会污染输出）
+        ecfg["model"] = utility_models(cfg)[0]
         ecfg["max_tokens"] = 80
         ecfg["temperature"] = 0
         reply, _ = chat(

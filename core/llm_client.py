@@ -36,6 +36,10 @@ DEFAULT_CONFIG = {
     "api_base": "https://ark.cn-beijing.volces.com/api/v3",
     "api_key": "",
     "model": "doubao-pro-32k",  # 豆包模型名 / 或 deepseek-chat
+    # 辅助任务模型（知识点提取、检索式翻译等）：留空则复用主模型
+    "utility_model": "",
+    # 辅助模型失败时的候选列表（按顺序尝试）
+    "utility_fallback_models": [],
     "temperature": 0.4,
     "max_tokens": 600,
     "timeout": 30,
@@ -118,11 +122,19 @@ def load_config():
         "BEDSIDE_API_BASE": "api_base",
         "BEDSIDE_API_KEY": "api_key",
         "BEDSIDE_MODEL": "model",
+        "BEDSIDE_UTILITY_MODEL": "utility_model",
     }
     for env_key, cfg_key in env_map.items():
         val = os.environ.get(env_key)
         if val:
             cfg[cfg_key] = val
+
+    # 候选模型列表用逗号分隔
+    fallback_env = os.environ.get("BEDSIDE_UTILITY_FALLBACK_MODELS")
+    if fallback_env:
+        cfg["utility_fallback_models"] = [
+            m.strip() for m in fallback_env.split(",") if m.strip()
+        ]
 
     # 模式有效性
     if cfg.get("mode") not in ("api", "offline"):
@@ -137,6 +149,24 @@ def load_config():
             cfg["mode"] = "offline"
 
     return cfg
+
+
+def utility_models(config=None):
+    """
+    辅助任务（知识点提取、检索式翻译等）的模型候选列表。
+    配置优先，主模型兜底；去重、保序。
+    """
+    cfg = config or load_config()
+    primary = (cfg.get("utility_model") or "").strip() or cfg.get("model", "")
+    models = [primary] if primary else []
+    fallback = cfg.get("utility_fallback_models") or []
+    if isinstance(fallback, str):
+        fallback = fallback.split(",")
+    for m in fallback:
+        m = (m or "").strip()
+        if m and m not in models:
+            models.append(m)
+    return models
 
 
 def chat(system_prompt, user_prompt, config=None):
@@ -210,8 +240,8 @@ def save_config(updates):
     保存配置到 .bedside_config.json（与现有配置合并）。
     仅接受白名单字段，避免写入任意键。
     """
-    allowed = {"mode", "api_base", "api_key", "model", "temperature",
-               "max_tokens", "timeout"}
+    allowed = {"mode", "api_base", "api_key", "model", "utility_model",
+               "utility_fallback_models", "temperature", "max_tokens", "timeout"}
     cfg = {}
     if os.path.exists(CONFIG_PATH):
         try:

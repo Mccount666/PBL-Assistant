@@ -710,12 +710,15 @@ let savedSettings = {};
 async function openSettings() {
   const data = await api('/api/settings');
   if (data.ok) {
-    savedSettings = data.settings || {};
-    $('set-base').value = savedSettings.base_url || '';
-    $('set-model').value = savedSettings.model || '';
-    $('key-state').textContent = savedSettings.key_masked ? '已配置：' + savedSettings.key_masked : '尚未配置';
-    $('voice-mode').value = savedSettings.voice_mode || 'realtime';
-    $('tts-toggle').checked = savedSettings.tts_enabled !== false;
+    // 兼容两种返回形状：{settings:{...}} 或扁平字段
+    const s = data.settings || data;
+    savedSettings = s;
+    $('set-base').value = s.api_base || s.base_url || '';
+    $('set-model').value = s.model || '';
+    $('set-utility-model').value = s.utility_model || '';
+    $('key-state').textContent = s.key_masked ? '已配置：' + s.key_masked : '尚未配置';
+    $('voice-mode').value = s.voice_mode || 'realtime';
+    $('tts-toggle').checked = s.tts_enabled !== false;
   }
   $('settings-modal').classList.remove('hidden');
   $('test-result').classList.add('hidden');
@@ -727,9 +730,10 @@ function closeSettings() {
 
 async function saveSettings() {
   const payload = {
-    base_url: $('set-base').value.trim(),
+    api_base: $('set-base').value.trim(),
     model: $('set-model').value.trim(),
-    key: $('set-key').value.trim(),
+    utility_model: $('set-utility-model').value.trim(),
+    api_key: $('set-key').value.trim(),
     voice_mode: $('voice-mode').value,
     tts_enabled: $('tts-toggle').checked,
   };
