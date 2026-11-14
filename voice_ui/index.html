@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PBL 讨论助手</title>
+<link rel="stylesheet" href="/ui/style.css?v=5">
+</head>
+<body>
+
+<!-- 背景装饰层 -->
+<div class="bg-decoration">
+  <div class="bg-gradient"></div>
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+    <div class="orb orb-4"></div>
+  </div>
+  <div class="bg-grid"></div>
+  <div class="bg-noise"></div>
+  <div class="bg-vignette"></div>
+</div>
+
+<header class="app-bar">
+  <div class="app-bar-left">
+    <div class="app-logo">
+      <div class="logo-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2C7.58 2 4 5.58 4 10c0 5.25 7 11.5 8 12 1-.5 8-6.75 8-12 0-4.42-3.58-8-8-8z"/>
+          <circle cx="12" cy="10" r="3"/>
+        </svg>
+      </div>
+      <div class="app-title-wrap">
+        <div class="app-title">PBL<span class="app-title-sub">讨论助手</span></div>
+        <div class="app-tagline">Problem-Based Learning</div>
+      </div>
+    </div>
+    <div class="app-case" id="case-label">选择案例</div>
+  </div>
+  <div class="app-bar-right">
+    <div class="conn-status" id="conn-status">离线</div>
+    <button id="release-btn" class="btn-text btn-glass">发放下一幕</button>
+    <button id="export-btn" class="btn-text btn-glass">导出纪要</button>
+    <button id="settings-btn" class="btn-text btn-glass">设置</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ 案例选择 ============ -->
+  <section id="picker-view">
+    <div class="picker">
+      <div class="picker-hero">
+        <h1 class="picker-title">开始一次<span class="highlight">深度学习</span>之旅</h1>
+        <p class="picker-subtitle">AI 驱动的 PBL 课堂讨论辅助</p>
+      </div>
+      <div class="picker-row">
+        <label for="team-input">小组</label>
+        <input id="team-input" type="text" maxlength="64" placeholder="如：第三小组">
+      </div>
+      <div class="case-list" id="case-list"></div>
+      <p class="picker-note">开始后自动发放第一幕。点击麦克风即可围坐讨论，导师只在值得介入时开口。</p>
+    </div>
+  </section>
+
+  <!-- ============ 讨论 ============ -->
+  <section id="discuss-view" class="hidden">
+    <div class="layout">
+
+      <!-- 左：案例 + 讨论 -->
+      <div class="pane pane-discuss">
+        <div class="case-panel">
+          <button class="case-toggle" id="case-toggle" onclick="toggleCase()">
+            <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+            </svg>
+            案例正文
+          </button>
+          <div class="case-body" id="case-body"></div>
+        </div>
+
+        <div class="chat" id="chat-box"></div>
+
+        <div class="composer">
+          <button id="mic-btn" class="mic" title="开始/停止聆听">
+            <span id="mic-icon">●</span>
+          </button>
+          <div class="composer-main">
+            <div class="composer-status" id="voice-state">麦克风未开启</div>
+            <div class="composer-sub" id="subtitle-text">点击左侧圆点开始聆听</div>
+            <div class="quick-actions" id="quick-actions"></div>
+            <div class="composer-row">
+              <input id="say-input" type="text" placeholder="或输入文字…">
+              <button type="submit" id="say-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：画板 -->
+      <div class="pane pane-board">
+
+        <!-- 知识点 -->
+        <div class="board-section">
+          <div class="board-sec-head">
+            <span class="board-sec-title">
+              <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0013.5 20h-3a3.374 3.374 0 00-1.945-3.546l-.547-.547z"/>
+              </svg>
+              知识点
+            </span>
+            <span class="board-sec-count" id="k-count"></span>
+          </div>
+          <div class="board-sec-body">
+            <div class="knowledge-grid" id="knowledge-grid"></div>
+          </div>
+        </div>
+
+        <!-- 假设 -->
+        <div class="board-section">
+          <div class="board-sec-head">
+            <span class="board-sec-title">
+              <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
+              假设
+            </span>
+            <span class="board-sec-count" id="h-count"></span>
+          </div>
+          <div class="board-sec-body">
+            <form class="mini-form" onsubmit="return submitHyp(event)">
+              <input id="hyp-input" type="text" placeholder="＋ 新假设" maxlength="80">
+            </form>
+            <div class="mini-list" id="hyp-list"></div>
+          </div>
+        </div>
+
+        <!-- 议题 -->
+        <div class="board-section">
+          <div class="board-sec-head">
+            <span class="board-sec-title">
+              <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              议题
+            </span>
+            <span class="board-sec-count" id="i-count"></span>
+          </div>
+          <div class="board-sec-body">
+            <form class="mini-form" onsubmit="return submitIssue(event)">
+              <input id="issue-input" type="text" placeholder="＋ 新议题" maxlength="80">
+            </form>
+            <div class="mini-list" id="issue-list"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- ============ 设置 ============ -->
+<div id="settings-modal" class="modal-mask hidden">
+  <div class="modal">
+    <div class="modal-head">
+      <span>设置</span>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label">API 地址</label>
+      <input id="set-base" type="text" placeholder="https://api.stepfun.com/v1">
+      <label class="field-label">模型</label>
+      <input id="set-model" type="text" placeholder="step-3.5-flash">
+      <label class="field-label">API Key</label>
+      <input id="set-key" type="password" placeholder="留空保持不变">
+      <div class="field-tip" id="key-state">尚未配置</div>
+
+      <label class="field-label">语音通道</label>
+      <select id="voice-mode">
+        <option value="realtime">实时语音（StepFun）</option>
+        <option value="browser">浏览器识别</option>
+      </select>
+
+      <div class="field-row">
+        <label class="check-row"><input type="checkbox" id="tts-toggle" checked> 语音播报</label>
+        <label class="check-row"><input type="checkbox" id="review-toggle" onchange="setReviewMode(this.checked)"> 复盘模式</label>
+      </div>
+
+      <div class="test-result hidden" id="test-result"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-text" onclick="closeSettings()">取消</button>
+      <button class="btn-text" id="test-btn" onclick="testConnection()">检测</button>
+      <button class="btn-primary" onclick="saveSettings()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/ui/app.js?v=6"></script>
+</body>
+</html>
