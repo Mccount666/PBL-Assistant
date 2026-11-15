@@ -1408,3 +1408,64 @@ main {
   border-radius: 8px;
   border: 1px solid var(--border);
 }
+
+/* ================= 白板增强：依据 / 知识点详情 ================= */
+.knowledge-block, .hyp-block { display: flex; flex-direction: column; }
+.knowledge-text, .hyp-text { cursor: pointer; }
+
+.knowledge-expand {
+  border: none; background: none; color: var(--text-faint);
+  cursor: pointer; font-size: 11px; padding: 2px 4px; border-radius: 4px;
+  transition: all 0.2s ease; flex-shrink: 0;
+}
+.knowledge-expand:hover { color: var(--accent); }
+
+.knowledge-detail {
+  margin: 2px 0 4px; padding: 8px 14px;
+  border-left: 2px solid rgba(129,140,248,0.25);
+  background: rgba(20, 28, 50, 0.35);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  display: flex; flex-direction: column; gap: 5px;
+  animation: msgSlideIn 0.2s ease;
+}
+.kd-row { display: flex; gap: 8px; font-size: 11.5px; line-height: 1.5; }
+.kd-label {
+  flex-shrink: 0; width: 56px; color: var(--text-faint);
+  font-size: 10.5px; letter-spacing: 1px;
+}
+.kd-row span:last-child { color: var(--text-secondary); }
+
+.knowledge-refs-box { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.knowledge-refs-box .knowledge-item { padding: 7px 12px; }
+
+.hyp-status-label {
+  font-size: 10px; padding: 1px 7px; border-radius: 8px;
+  white-space: nowrap; flex-shrink: 0; font-weight: 500;
+}
+.hyp-status-label.open { color: var(--amber); background: rgba(251,191,36,0.08); }
+.hyp-status-label.confirmed { color: var(--emerald); background: rgba(52,211,153,0.08); }
+.hyp-status-label.rejected { color: var(--rose); background: rgba(244,63,94,0.08); }
+
+.hyp-ev-count {
+  font-size: 10px; color: var(--accent); cursor: pointer;
+  padding: 1px 7px; border-radius: 8px; white-space: nowrap; flex-shrink: 0;
+  background: var(--accent-dim); transition: all 0.2s ease;
+}
+.hyp-ev-count:hover { background: rgba(129,140,248,0.22); }
+
+.hyp-detail {
+  margin: 2px 0 4px; padding: 8px 14px;
+  border-left: 2px solid rgba(129,140,248,0.25);
+  background: rgba(20, 28, 50, 0.35);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  animation: msgSlideIn 0.2s ease;
+}
+.hyp-ev-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.hyp-ev-item { display: flex; gap: 8px; font-size: 11.5px; line-height: 1.5; color: var(--text-secondary); }
+.hyp-ev-act {
+  flex-shrink: 0; font-size: 10px; color: var(--accent);
+  background: var(--accent-dim); padding: 0 6px; border-radius: 6px;
+  align-self: flex-start; margin-top: 1px;
+}
+.hyp-ev-empty { font-size: 11px; color: var(--text-faint); padding: 2px 0 6px; }
+.hyp-detail .mini-form { margin-bottom: 0; }

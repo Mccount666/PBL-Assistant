@@ -294,6 +294,42 @@ def get_issues(conn, session_id):
     return [dict(r) for r in rows]
 
 
+def add_hypothesis_row(conn, session_id, text, act_no):
+    """新增假设（同文本去重），返回假设 id。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    dup = conn.execute(
+        "SELECT id FROM hypotheses WHERE session_id = ? AND text = ?",
+        (session_id, text)).fetchone()
+    if dup:
+        return dup["id"]
+    cur = conn.execute(
+        "INSERT INTO hypotheses (session_id, text, status, created_act, created_at) VALUES (?,?,?,?,?)",
+        (session_id, text, "proposed", act_no, now_str()))
+    hid = cur.lastrowid
+    conn.execute(
+        "INSERT INTO hypothesis_events (hyp_id, act_no, status, note, created_at) VALUES (?,?,?,?,?)",
+        (hid, act_no, "proposed", "提出假设", now_str()))
+    return hid
+
+
+def add_issue_row(conn, session_id, text, act_no):
+    """新增学习议题（同文本去重），返回议题 id。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    dup = conn.execute(
+        "SELECT id FROM issues WHERE session_id = ? AND text = ?",
+        (session_id, text)).fetchone()
+    if dup:
+        return dup["id"]
+    cur = conn.execute(
+        "INSERT INTO issues (session_id, text, status, source_act, created_at) VALUES (?,?,?,?,?)",
+        (session_id, text, "open", act_no, now_str()))
+    return cur.lastrowid
+
+
 # ---------- 笔记画布 ----------
 
 def add_canvas_node(conn, session_id, ntype, text, act_no, source="ai"):
@@ -380,12 +416,11 @@ def key_point(reply, max_len=18):
 
 
 def canvas_note_for_intervention(conn, session_id, reply, actions, act_no):
-    """AI 介入后，把要点写到画布上。"""
-    for a in actions or []:
-        if a.get("type") == "add_hypothesis":
-            add_canvas_node(conn, session_id, "hypothesis", "假设：" + a["text"], act_no)
-        elif a.get("type") == "add_issue":
-            add_canvas_node(conn, session_id, "question", "议题：" + a["text"], act_no)
+    """AI 介入后，把导师要点写到画布。
+
+    假设/议题不再直接写画布，而是作为快捷动作交给学生确认后
+    写入假设板/议题清单（见前端 acceptAction），避免重复与越权。
+    """
     if reply:
         kp = key_point(reply)
         if kp:
@@ -393,7 +428,7 @@ def canvas_note_for_intervention(conn, session_id, reply, actions, act_no):
 
 
 def canvas_note_from_speech(conn, session_id, text, act_no):
-    """从学生语音转写中提取假设/议题，实时写到画布。"""
+    """从学生语音转写中提取假设/议题，实时写入假设板/议题清单。"""
     if not text:
         return
     from core.discussion_coach import DX_ALIASES, QUESTION_WORDS
@@ -401,11 +436,10 @@ def canvas_note_from_speech(conn, session_id, text, act_no):
     t = text
     for dx, aliases in DX_ALIASES.items():
         if any(a in t for a in aliases):
-            add_canvas_node(conn, session_id, "hypothesis", "假设：" + dx, act_no)
+            add_hypothesis_row(conn, session_id, dx, act_no)
             break
     if any(w in t for w in QUESTION_WORDS):
-        add_canvas_node(conn, session_id, "question",
-                        "议题：" + summarize_note(t, 22), act_no)
+        add_issue_row(conn, session_id, summarize_note(t, 22), act_no)
 
 
 # ============================================================
@@ -1045,13 +1079,7 @@ async def board_add(payload: dict):
         if not session:
             return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=401)
         act_no = session["released_acts"]
-        cur = conn.execute(
-            "INSERT INTO hypotheses (session_id, text, status, created_act, created_at) VALUES (?,?,?,?,?)",
-            (session["id"], text, "proposed", act_no, now_str()))
-        hid = cur.lastrowid
-        conn.execute(
-            "INSERT INTO hypothesis_events (hyp_id, act_no, status, note, created_at) VALUES (?,?,?,?,?)",
-            (hid, act_no, "proposed", "提出假设", now_str()))
+        hid = add_hypothesis_row(conn, session["id"], text, act_no)
         return {"ok": True, "id": hid, "text": text, "status": "proposed", "created_act": act_no}
 
 
@@ -1128,10 +1156,8 @@ async def issue_add(payload: dict):
         if not session:
             return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=401)
         act_no = session["released_acts"]
-        cur = conn.execute(
-            "INSERT INTO issues (session_id, text, status, source_act, created_at) VALUES (?,?,?,?,?)",
-            (session["id"], text, "open", act_no, now_str()))
-        return {"ok": True, "id": cur.lastrowid, "text": text, "status": "open", "source_act": act_no}
+        iid = add_issue_row(conn, session["id"], text, act_no)
+        return {"ok": True, "id": iid, "text": text, "status": "open", "source_act": act_no}
 
 
 @app.post("/api/issue/status")

@@ -19,6 +19,8 @@ const state = {
   quietMs: 2200,
   rendered: new Set(),
   starting: false,
+  expandedHyps: new Set(),
+  expandedKnowledge: new Set(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -152,7 +154,7 @@ async function refreshAll() {
   $('case-label').textContent = (data.team ? data.team + ' · ' : '') + data.case.title;
   renderCase();
   renderDialogue(data.dialogue || []);
-  renderBoard(data.canvas || []);
+  renderBoard(data);
   updateReleaseBtn();
 }
 
@@ -219,13 +221,12 @@ function safeJson(s) {
   try { return JSON.parse(s || '{}') || {}; } catch (e) { return {}; }
 }
 
-function renderBoard(nodes) {
-  const knowledge = nodes.filter((n) => n.type === 'knowledge');
-  const hyps = nodes.filter((n) => n.type === 'hypothesis');
-  const issues = nodes.filter((n) => n.type === 'question');
+function renderBoard(data) {
+  // 假设/议题以 hypotheses/issues 表为准；知识点来自画布
+  const knowledge = (data.canvas || []).filter((n) => n.type === 'knowledge');
   renderKnowledge(knowledge);
-  renderHyps(hyps);
-  renderIssues(issues);
+  renderHyps(data.board || []);
+  renderIssues(data.issues || []);
 }
 
 function renderKnowledge(items) {
@@ -237,17 +238,38 @@ function renderKnowledge(items) {
   }
   box.innerHTML = items.map((n) => {
     const d = safeJson(n.detail);
-    const tag = d.diseases && d.diseases.length ? '<span class="knowledge-tag disease">' + esc(d.diseases[0]) + '</span>'
-      : d.types && d.types.length ? '<span class="knowledge-tag type">' + esc(d.types[0]) + '</span>'
+    const diseases = d.diseases || [], types = d.types || [], notes = d.notes || [];
+    const tag = diseases.length ? '<span class="knowledge-tag disease">' + esc(diseases[0]) + '</span>'
+      : types.length ? '<span class="knowledge-tag type">' + esc(types[0]) + '</span>'
       : '<span class="knowledge-tag symptom">症状</span>';
-    const extra = d.diseases && d.diseases.length > 1 ? ' +' + (d.diseases.length - 1)
-      : d.types && d.types.length > 1 ? ' +' + (d.types.length - 1) : '';
-    return `<div class="knowledge-item" id="kcard-${n.id}">
-      <span class="knowledge-text">${esc(n.text)}</span>
-      ${tag}${extra}
-      <button class="knowledge-refs" onclick="loadRefs(${n.id})" title="检索相关文献">文献</button>
+    const hasDetail = diseases.length || types.length || notes.length;
+    const detail = `<div class="knowledge-detail hidden" id="kdetail-${n.id}">
+        ${diseases.length ? '<div class="kd-row"><span class="kd-label">相关疾病</span><span>' + diseases.map(esc).join('、') + '</span></div>' : ''}
+        ${types.length ? '<div class="kd-row"><span class="kd-label">分类分型</span><span>' + types.map(esc).join('、') + '</span></div>' : ''}
+        ${notes.length ? '<div class="kd-row"><span class="kd-label">追问要点</span><span>' + notes.map(esc).join('；') + '</span></div>' : ''}
+      </div>`;
+    return `<div class="knowledge-block" id="kblock-${n.id}">
+      <div class="knowledge-item">
+        <span class="knowledge-text" onclick="toggleKnowledge(${n.id})" title="点击展开详情">${esc(n.text)}</span>
+        ${tag}
+        ${hasDetail ? '<button class="knowledge-expand" onclick="toggleKnowledge(' + n.id + ')" title="展开详情">▾</button>' : ''}
+        <button class="knowledge-refs" onclick="loadRefs(${n.id})" title="检索相关文献">文献</button>
+      </div>
+      ${hasDetail ? detail : ''}
+      <div class="knowledge-refs-box hidden" id="krefs-${n.id}"></div>
     </div>`;
   }).join('');
+  state.expandedKnowledge.forEach((id) => {
+    const el = $('kdetail-' + id);
+    if (el) el.classList.remove('hidden');
+  });
+}
+
+function toggleKnowledge(id) {
+  const el = $('kdetail-' + id);
+  if (!el) return;
+  if (el.classList.toggle('hidden')) state.expandedKnowledge.delete(id);
+  else state.expandedKnowledge.add(id);
 }
 
 async function loadRefs(nodeId) {
@@ -278,21 +300,74 @@ function renderHyps(items) {
   const box = $('hyp-list');
   $('h-count').textContent = items.length ? items.length + ' 条' : '';
   if (!items.length) {
-    box.innerHTML = '<div class="mini-empty">暂无</div>';
+    box.innerHTML = '<div class="mini-empty">暂无，讨论中提出或手动添加</div>';
     return;
   }
+  // 保留正在输入的依据，避免刷新时丢失
+  const prevVals = {};
+  box.querySelectorAll('.hyp-block').forEach((b) => {
+    const id = b.id.replace('hyp-', '');
+    const inp = b.querySelector('.hyp-detail input');
+    if (inp && inp.value) prevVals[id] = inp.value;
+  });
   box.innerHTML = items.map((h) => {
     const st = STATUS[h.status] || STATUS.proposed;
     const text = h.text.replace(/^假设：/, '');
     const done = h.status === 'refuted';
-    return `<div class="hyp-item">
-      <span class="hyp-dot ${st.dot}"></span>
-      <span class="hyp-text ${done ? 'rejected' : ''}">${esc(text)}</span>
-      <button class="hyp-status-btn" onclick="setHypStatus(${h.id},'supported')" title="支持增强">✓</button>
-      <button class="hyp-status-btn" onclick="setHypStatus(${h.id},'refuted')" title="推翻">✗</button>
-      <button class="mini-del" onclick="deleteHyp(${h.id})" title="删除">✕</button>
+    const ev = h.evidence || [];
+    return `<div class="hyp-block" id="hyp-${h.id}">
+      <div class="hyp-item">
+        <span class="hyp-dot ${st.dot}" title="${st.label}"></span>
+        <span class="hyp-text ${done ? 'rejected' : ''}" onclick="toggleHypDetail(${h.id})" title="点击展开依据">${esc(text)}</span>
+        <span class="hyp-status-label ${st.dot}">${st.label}</span>
+        ${ev.length ? '<span class="hyp-ev-count" onclick="toggleHypDetail(' + h.id + ')" title="查看依据">' + ev.length + ' 依据</span>' : ''}
+        <button class="hyp-status-btn" onclick="setHypStatus(${h.id},'supported')" title="支持增强">✓</button>
+        <button class="hyp-status-btn" onclick="setHypStatus(${h.id},'refuted')" title="推翻">✗</button>
+        <button class="mini-del" onclick="deleteHyp(${h.id})" title="删除">✕</button>
+      </div>
+      <div class="hyp-detail hidden" id="hyp-detail-${h.id}">
+        <div class="hyp-ev-list">${renderEvidence(ev)}</div>
+        <form class="mini-form" onsubmit="return addEvidence(event, ${h.id})">
+          <input type="text" placeholder="＋ 补充依据：案例里的哪条信息支持它？" maxlength="200">
+        </form>
+      </div>
     </div>`;
   }).join('');
+  state.expandedHyps.forEach((id) => {
+    const d = $('hyp-detail-' + id);
+    if (d) {
+      d.classList.remove('hidden');
+      if (prevVals[id]) {
+        const inp = d.querySelector('input');
+        if (inp) inp.value = prevVals[id];
+      }
+    }
+  });
+}
+
+function renderEvidence(ev) {
+  if (!ev || !ev.length) {
+    return '<div class="hyp-ev-empty">还没有依据 —— 补充案例里支持它的信息</div>';
+  }
+  return ev.map((e) => '<div class="hyp-ev-item"><span class="hyp-ev-act">第' + e.act_no + '幕</span><span>' + esc(e.note) + '</span></div>').join('');
+}
+
+function toggleHypDetail(id) {
+  const el = $('hyp-detail-' + id);
+  if (!el) return;
+  if (el.classList.toggle('hidden')) state.expandedHyps.delete(id);
+  else state.expandedHyps.add(id);
+}
+
+async function addEvidence(ev, id) {
+  ev.preventDefault();
+  const input = ev.target.querySelector('input');
+  const note = input.value.trim();
+  if (!note) return false;
+  await api('/api/board/evidence', { id, note });
+  state.expandedHyps.add(id);
+  await refreshAll();
+  return false;
 }
 
 function renderIssues(items) {
