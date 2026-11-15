@@ -135,20 +135,16 @@ class DiscussionCoach:
             for a in self.case["acts"]
         )
         return (
-            "你是 PBL（问题导向学习）小组讨论的导师（tutor）。"
-            "学生小组正在讨论病例，目前已发放到第 {} 幕。\n\n"
-            "【本案例助教参考（你心里有数即可，严禁直接告诉学生）】\n{}\n\n"
+            "你是 PBL（问题导向学习）小组的学习助手。学生正在讨论病例，目前已发放到第 {} 幕。\n\n"
+            "【案例助教参考（仅供你把握方向，不要直接报最终诊断）】\n{}\n\n"
             "【当前假设板】{}\n【当前学习议题】{}\n\n"
-            "【导师行为准则 —— 必须严格遵守】\n"
-            "1. 你绝不讲解医学知识、绝不给答案、绝不评价对错，只提问和引导。\n"
-            "2. 学生提出观点/假设时，追问依据：'你们的依据是案例里哪条信息？'\n"
-            "3. 适时唱反调激发怀疑：'有没有另一种疾病也能解释这些表现？'\n"
-            "4. 学生讨论陷入停顿时，从这些维度选一个提示：时间线、危险信号、"
-            "心理社会因素、假设间如何区分、还需什么证据。\n"
-            "5. 发现学生提到某个疾病推测但假设板上没有，提示他们记录下来。\n"
-            "6. 发现学生提出'为什么/机制'类问题，提示列入学习议题。\n"
-            "7. 每次回复不超过3句话，语气是引导式的讨论主持人，不是讲师。\n"
-            "8. 学生直接问答案时，把问题抛回小组。"
+            "【助手行为准则】\n"
+            "1. 你是学生的医学学习助手，直接、务实地帮他们理解案例和知识；不要用问题反抛，也不要让他们自己去原文找。\n"
+            "2. 学生问知识/机制/症状时，给出简明讲解和关键推理点（如腹痛的部位/性质/时间/伴随/加重缓解/鉴别）。\n"
+            "3. 学生提到某主题时，主动给出可沿之展开的 3-5 个要点，并推荐可查的文献主题。\n"
+            "4. 帮他们分析案例信息：列出支持/反对某假设的依据，比较鉴别诊断。\n"
+            "5. 学生问诊断/答案时，可以直接给出分析和倾向性判断，并说明依据；不确定的地方要讲清楚，不要编造。\n"
+            "6. 回复结构清晰、要点化，控制在 5 句以内，语气友好务实。"
         ).format(current_act_no, acts_brief, board_summary or "（空）", issues_summary or "（空）")
 
     # ---------------- 对外主入口 ----------------
@@ -203,12 +199,23 @@ class DiscussionCoach:
                         actions.append({"type": "add_hypothesis", "text": dx})
                 return reply, actions
 
-        # ---- 离线轨：规则催化 ----
+        # ---- 离线轨：助手式脚手架 ----
+        from core.tutor_assist import detect_topic, is_topic_query, scaffold_text
 
-        # 1) 直接要答案 → 抛回小组
+        # 0) 提到主题并提问 → 给关键推理点（不再甩「自己去原文找」）
+        topic = detect_topic(text)
+        if topic and is_topic_query(text):
+            for d in self._detect_dx(text):
+                if not any(d in bt for bt in board_texts):
+                    actions.append({"type": "add_hypothesis", "text": d})
+            return scaffold_text(topic), actions
+
+        # 1) 直接要最终诊断 → 给方向而非答案
         if any(w in text for w in ANSWER_SEEKING):
-            return ("这个问题现在没有标准答案——这正是要讨论的原因。"
-                    "先用案例里已有的信息，说出你们倾向哪个方向、为什么？"), []
+            if topic:
+                return scaffold_text(topic), actions
+            return ("现在先不急着下结论。把案例里的关键信息列出来，"
+                    "说说你们倾向哪个方向、依据是什么？我可以帮你们补充该方向的思考要点。"), []
 
         # 2) 提到疾病推测
         dxs = self._detect_dx(text)

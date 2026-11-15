@@ -155,7 +155,7 @@ def generate_minutes(case, board, issues, dialogue, meta, output_path):
 
     # ---------- 四、讨论摘录 ----------
     _add_heading_cn(doc, "四、讨论摘录", 1)
-    role_names = {"student": "学生", "coach": "导师", "system": "系统"}
+    role_names = {"student": "学生", "coach": "助手", "system": "系统"}
     for d in dialogue:
         # 兼容两种输入：("student", "文本") 或 {"role": ..., "content": ...}
         if isinstance(d, dict):

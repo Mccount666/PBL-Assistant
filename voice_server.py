@@ -47,6 +47,7 @@ from core.board import STATUS_LABELS, STATUS_ICONS
 from core.report import generate_minutes
 from core.llm_client import load_config, mask_key, save_config, test_connection, utility_models
 from core.board_writer import detect_write_intent, beautify_board_entry
+from core.tutor_assist import detect_topic, is_topic_query, literature_for
 
 DB_PATH = ROOT / "data" / "voice.sqlite"
 REPORTS_DIR = ROOT / "reports"
@@ -147,6 +148,11 @@ def init_db():
     # 旧库迁移：补充 detail 列（已存在则忽略）
     try:
         conn.execute("ALTER TABLE canvas_nodes ADD COLUMN detail TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+    # 旧库迁移：dialogue 补充 meta 列（存文献推荐等）
+    try:
+        conn.execute("ALTER TABLE dialogue ADD COLUMN meta TEXT DEFAULT ''")
     except sqlite3.OperationalError:
         pass
     conn.commit()
@@ -261,15 +267,15 @@ def save_coach(conn, session_id, coach):
     conn.execute("UPDATE sessions SET coach_state = ? WHERE id = ?", (state, session_id))
 
 
-def add_dialogue(conn, session_id, role, content, act_no):
+def add_dialogue(conn, session_id, role, content, act_no, meta=""):
     conn.execute(
-        "INSERT INTO dialogue (session_id, role, content, act_no, created_at) VALUES (?,?,?,?,?)",
-        (session_id, role, content, act_no, now_str()))
+        "INSERT INTO dialogue (session_id, role, content, act_no, created_at, meta) VALUES (?,?,?,?,?,?)",
+        (session_id, role, content, act_no, now_str(), meta or ""))
 
 
 def get_dialogue(conn, session_id):
     rows = conn.execute(
-        "SELECT role, content, act_no, created_at FROM dialogue WHERE session_id = ? ORDER BY id",
+        "SELECT role, content, act_no, created_at, meta FROM dialogue WHERE session_id = ? ORDER BY id",
         (session_id,)).fetchall()
     return [dict(r) for r in rows]
 
@@ -617,7 +623,7 @@ def state_payload(conn, session, case):
 def engine_label():
     cfg = load_config()
     if cfg.get("mode") == "api":
-        return "AI 导师（{}）".format(cfg.get("model"))
+        return "AI 助手（{}）".format(cfg.get("model"))
     return "离线规则引擎（未配置 AI Key）"
 
 
@@ -1074,8 +1080,12 @@ async def discuss(payload: dict):
             return {"ok": True, "reply": reply, "actions": [],
                     "reason": "board_write", "written": written}
 
+        topic = detect_topic(text)
+        topic_q = bool(topic and is_topic_query(text))
         if force:
             intervene, reason = True, "forced"
+        elif topic_q:
+            intervene, reason = True, "topic_query"
         else:
             intervene, reason = should_intervene(text, silent_streak)
 
@@ -1092,11 +1102,26 @@ async def discuss(payload: dict):
               "status_cn": STATUS_LABELS.get(b["status"], b["status"])} for b in board],
             [{"text": i["text"], "status": i["status"]} for i in issues])
         save_coach(conn, session["id"], coach)
-        add_dialogue(conn, session["id"], "coach", reply, act_no)
+
+        # 主题提问 → 附真实文献推荐（数据库检索）
+        refs_items = []
+        meta = ""
+        if topic_q:
+            try:
+                res = await asyncio.wait_for(
+                    asyncio.to_thread(literature_for, topic, load_config(), 3),
+                    timeout=15)
+                refs_items = (res or {}).get("items") or []
+            except Exception:
+                refs_items = []
+            if refs_items:
+                meta = json.dumps({"topic": topic, "refs": refs_items},
+                                  ensure_ascii=False)
+        add_dialogue(conn, session["id"], "coach", reply, act_no, meta)
 
         # 白板改为显式写入，这里不再自动上板
         return {"ok": True, "reply": reply, "actions": actions, "reason": reason,
-                "written": None}
+                "written": None, "topic": topic, "refs": refs_items}
 
 
 @app.get("/api/state")
@@ -1564,16 +1589,12 @@ async def ws_realtime(ws: WebSocket, session_token: str, model: str = "stepaudio
                                     await ws.send_text(json.dumps({"type": "board.updated"}))
                             except Exception:
                                 pass
-                # 导师语音回复转写完成 → 记入讨论流 + 画布笔记
+                # 助手语音回复转写完成 → 记入讨论流（不再自动上板，白板只显式写入）
                 elif mtype == "response.audio_transcript.done":
                     text = (msg.get("transcript") or "").strip()
                     if text:
-                        kp = key_point(text)
                         with db() as conn:
                             add_dialogue(conn, session_id, "coach", text, act_no)
-                            if kp:
-                                add_canvas_node(conn, session_id, "insight",
-                                                "导师：" + kp, act_no)
 
                 await ws.send_text(json.dumps(msg, ensure_ascii=False))
         except Exception:

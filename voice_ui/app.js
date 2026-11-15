@@ -104,7 +104,7 @@ async function loadCases() {
 function setConn(engine) {
   const el = $('conn-status');
   if (!el) return;
-  const isApi = engine && (engine.indexOf('AI 导师') >= 0 || engine.indexOf('API 模式') >= 0);
+  const isApi = engine && (engine.indexOf('AI 助手') >= 0 || engine.indexOf('AI 导师') >= 0 || engine.indexOf('API 模式') >= 0);
   if (isApi) {
     el.textContent = 'AI 已连接';
     el.classList.add('live');
@@ -200,8 +200,8 @@ function toggleCase() {
 /* ================= 对话渲染 ================= */
 function renderDialogue(dialogue) {
   const box = $('chat-box');
-  const roleName = { student: '学生', coach: '导师' };
-  const avatarMap = { student: '学', coach: '导' };
+  const roleName = { student: '学生', coach: '助手' };
+  const avatarMap = { student: '学', coach: '助' };
   box.innerHTML = dialogue.map((d) => {
     if (d.role === 'system') {
       return `<div class="chat-msg sys">
@@ -210,9 +210,22 @@ function renderDialogue(dialogue) {
       </div>`;
     }
     const cls = d.role === 'student' ? 'user' : 'tutor';
+    let refs = '';
+    if (d.role === 'coach' && d.meta) {
+      try {
+        const m = JSON.parse(d.meta);
+        if (m.refs && m.refs.length) {
+          refs = '<div class="chat-refs"><div class="chat-refs-title">可查文献</div>' +
+            m.refs.map((it) => `<a class="chat-ref" href="${esc(it.url)}" target="_blank" rel="noopener">
+              <span class="chat-ref-title">${esc(it.title)}</span>
+              <span class="chat-ref-meta">${esc(it.journal || '')}${it.year ? ' · ' + esc(it.year) : ''}${it.source ? ' · ' + esc(it.source) : ''}</span>
+            </a>`).join('') + '</div>';
+        }
+      } catch (e) { refs = ''; }
+    }
     return `<div class="chat-msg ${cls}">
       <div class="chat-avatar">${avatarMap[d.role] || '·'}</div>
-      <div class="chat-bubble">${fmt(d.content)}</div>
+      <div class="chat-bubble">${fmt(d.content)}${refs}</div>
     </div>`;
   }).join('');
   box.scrollTop = box.scrollHeight;
@@ -265,7 +278,7 @@ function setBoardView(mode) {
   }
 }
 
-const NODE_KIND = { hypothesis: '假设', knowledge: '知识点', issue: '议题', insight: '导师提示' };
+const NODE_KIND = { hypothesis: '假设', knowledge: '知识点', issue: '议题', insight: '助手提示' };
 
 function openNodeDetail(type, id) {
   state.openNode = { type, id: String(id) };
@@ -293,7 +306,7 @@ function renderNodeDetail() {
 
   const title = o.type === 'hypothesis' ? node.text.replace(/^假设：/, '')
     : o.type === 'issue' ? node.text.replace(/^议题：/, '')
-    : o.type === 'insight' ? node.text.replace(/^导师：/, '') : node.text;
+    : o.type === 'insight' ? node.text.replace(/^(导师|助手)：/, '') : node.text;
   let html = `<div class="nd-head"><span class="nd-kind ${o.type}">${NODE_KIND[o.type] || ''}</span>
     <button class="nd-close" onclick="closeNodeDetail()" title="关闭">✕</button></div>
     <div class="nd-title">${esc(title)}</div>`;
@@ -351,7 +364,7 @@ function renderInsights(items) {
   sec.classList.remove('hidden');
   const recent = items.slice(-8).reverse();
   box.innerHTML = recent.map((n) => {
-    const text = n.text.replace(/^导师：/, '');
+    const text = n.text.replace(/^(导师|助手)：/, '');
     return '<div class="insight-item"><span class="insight-dot"></span><span>' + esc(text) + '</span></div>';
   }).join('');
 }
@@ -605,8 +618,8 @@ async function sendDiscussion(text, force = false, forceWrite = false) {
   if (!state.token || state.thinking) return;
   state.thinking = true;
   updateMic();
-  setVoiceState(forceWrite ? '正在美化写入白板…' : '导师思考中…',
-                forceWrite ? 'AI 正基于案例整理这条内容' : '正在结合案例与画板生成回应');
+  setVoiceState(forceWrite ? '正在美化写入白板…' : '助手思考中…',
+                forceWrite ? 'AI 正基于案例整理这条内容' : '助手正在结合案例整理回应');
 
   try {
     const data = await api('/api/discuss', { text, force, force_write: forceWrite });
@@ -655,7 +668,7 @@ function speak(text) {
   if (v) u.voice = v;
   state.speaking = true;
   if (state.recog && state.listening) { try { state.recog.abort(); } catch (e) {} }
-  setVoiceState('导师发言中…', '');
+  setVoiceState('助手发言中…', '');
   u.onend = u.onerror = () => {
     state.speaking = false;
     if (state.listening) {
@@ -715,10 +728,10 @@ function handleRealtimeEvent(msg) {
   } else if (t === 'input_audio_buffer.speech_started') {
     setVoiceState('聆听中…', '请继续发言');
   } else if (t === 'input_audio_buffer.speech_stopped') {
-    setVoiceState('导师思考中…', '');
+    setVoiceState('助手思考中…', '');
   } else if (t === 'response.audio.delta') {
     if (msg.delta) playPcm16(msg.delta);
-    setVoiceState('导师发言中…', '');
+    setVoiceState('助手发言中…', '');
   } else if (t === 'response.audio_transcript.delta') {
     rt.aiText += msg.delta || '';
     $('subtitle-text').textContent = rt.aiText;
@@ -1149,7 +1162,7 @@ async function confirmImport() {
   if (askBtn) askBtn.addEventListener('click', () => {
     const buf = state.buffer.join(' ').trim();
     state.buffer = [];
-    sendDiscussion(buf || '请导师结合目前讨论给一个引导性问题', true);
+    sendDiscussion(buf || '请助手结合目前讨论给一个引导性问题', true);
   });
   $('release-btn').addEventListener('click', releaseAct);
   $('export-btn').addEventListener('click', exportMinutes);
