@@ -226,11 +226,29 @@ function safeJson(s) {
 }
 
 function renderBoard(data) {
-  // 假设/议题以 hypotheses/issues 表为准；知识点来自画布
-  const knowledge = (data.canvas || []).filter((n) => n.type === 'knowledge');
-  renderKnowledge(knowledge);
+  // 假设/议题以 hypotheses/issues 表为准；知识点与导师提示来自画布
+  const canvas = data.canvas || [];
+  renderInsights(canvas.filter((n) => n.type === 'insight'));
+  renderKnowledge(canvas.filter((n) => n.type === 'knowledge'));
   renderHyps(data.board || []);
   renderIssues(data.issues || []);
+}
+
+function renderInsights(items) {
+  const sec = $('insight-section');
+  const box = $('insight-list');
+  $('ins-count').textContent = items.length ? items.length + ' 条' : '';
+  if (!items.length) {
+    sec.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  sec.classList.remove('hidden');
+  const recent = items.slice(-8).reverse();
+  box.innerHTML = recent.map((n) => {
+    const text = n.text.replace(/^导师：/, '');
+    return '<div class="insight-item"><span class="insight-dot"></span><span>' + esc(text) + '</span></div>';
+  }).join('');
 }
 
 function renderKnowledge(items) {

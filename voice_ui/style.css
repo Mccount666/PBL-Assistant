@@ -1489,3 +1489,18 @@ main {
 }
 .hyp-item:hover .mini-edit, .issue-item:hover .mini-edit { opacity: 1; }
 .mini-edit:hover { color: var(--accent); }
+
+/* ================= 白板：导师提示 ================= */
+.insight-list { display: flex; flex-direction: column; gap: 5px; }
+.insight-item {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 12px; color: var(--text-secondary); line-height: 1.5;
+  padding: 6px 12px; border-radius: var(--r-sm);
+  background: rgba(252, 211, 77, 0.05);
+  border: 1px solid rgba(252, 211, 77, 0.14);
+  animation: msgSlideIn 0.25s ease;
+}
+.insight-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold); flex-shrink: 0; margin-top: 6px;
+}

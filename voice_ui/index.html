@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PBL 讨论助手</title>
-<link rel="stylesheet" href="/ui/style.css?v=8">
+<link rel="stylesheet" href="/ui/style.css?v=9">
 </head>
 <body>
 
@@ -109,6 +109,22 @@
 
       <!-- 右：画板 -->
       <div class="pane pane-board">
+
+        <!-- 导师提示 -->
+        <div class="board-section hidden" id="insight-section">
+          <div class="board-sec-head">
+            <span class="board-sec-title">
+              <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+              </svg>
+              导师提示
+            </span>
+            <span class="board-sec-count" id="ins-count"></span>
+          </div>
+          <div class="board-sec-body">
+            <div class="insight-list" id="insight-list"></div>
+          </div>
+        </div>
 
         <!-- 知识点 -->
         <div class="board-section">
@@ -237,6 +253,6 @@
   </div>
 </div>
 
-<script src="/ui/app.js?v=10"></script>
+<script src="/ui/app.js?v=11"></script>
 </body>
 </html>
