@@ -1145,6 +1145,25 @@ async def board_delete(payload: dict):
         return {"ok": True}
 
 
+@app.post("/api/board/edit")
+async def board_edit(payload: dict):
+    token = payload.get("token", "")
+    hid = int(payload.get("hyp_id") or payload.get("id") or 0)
+    text = (payload.get("text") or "").strip()[:255]
+    if not text:
+        return {"ok": False, "error": "内容为空"}
+    with db() as conn:
+        session = require_session(conn, token)
+        if not session:
+            return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=401)
+        row = conn.execute(
+            "SELECT id FROM hypotheses WHERE id = ? AND session_id = ?", (hid, session["id"])).fetchone()
+        if not row:
+            return JSONResponse({"ok": False, "error": "假设不存在"}, status_code=404)
+        conn.execute("UPDATE hypotheses SET text = ? WHERE id = ?", (text, hid))
+        return {"ok": True}
+
+
 @app.post("/api/issue/add")
 async def issue_add(payload: dict):
     token = payload.get("token", "")
@@ -1192,6 +1211,25 @@ async def issue_delete(payload: dict):
         if not row:
             return JSONResponse({"ok": False, "error": "议题不存在"}, status_code=404)
         conn.execute("DELETE FROM issues WHERE id = ?", (iid,))
+        return {"ok": True}
+
+
+@app.post("/api/issue/edit")
+async def issue_edit(payload: dict):
+    token = payload.get("token", "")
+    iid = int(payload.get("issue_id") or payload.get("id") or 0)
+    text = (payload.get("text") or "").strip()[:500]
+    if not text:
+        return {"ok": False, "error": "内容为空"}
+    with db() as conn:
+        session = require_session(conn, token)
+        if not session:
+            return JSONResponse({"ok": False, "error": "会话不存在"}, status_code=401)
+        row = conn.execute(
+            "SELECT id FROM issues WHERE id = ? AND session_id = ?", (iid, session["id"])).fetchone()
+        if not row:
+            return JSONResponse({"ok": False, "error": "议题不存在"}, status_code=404)
+        conn.execute("UPDATE issues SET text = ? WHERE id = ?", (text, iid))
         return {"ok": True}
 
 

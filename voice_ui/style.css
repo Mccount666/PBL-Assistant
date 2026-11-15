@@ -1469,3 +1469,23 @@ main {
 }
 .hyp-ev-empty { font-size: 11px; color: var(--text-faint); padding: 2px 0 6px; }
 .hyp-detail .mini-form { margin-bottom: 0; }
+
+/* ================= 白板：状态演变时间线 / 编辑 ================= */
+.hyp-timeline {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-bottom: 8px; padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border);
+}
+.hyp-tl-title { font-size: 10px; letter-spacing: 1px; color: var(--text-faint); margin-bottom: 2px; }
+.hyp-tl-item { display: flex; align-items: center; gap: 7px; font-size: 11px; }
+.hyp-tl-act { flex-shrink: 0; font-size: 10px; color: var(--text-faint); width: 34px; }
+.hyp-tl-label { color: var(--text-secondary); }
+.hyp-tl-note { color: var(--text-faint); font-size: 10.5px; }
+
+.mini-edit {
+  border: none; background: none; color: var(--text-faint);
+  cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 4px;
+  transition: all 0.2s ease; opacity: 0; flex-shrink: 0;
+}
+.hyp-item:hover .mini-edit, .issue-item:hover .mini-edit { opacity: 1; }
+.mini-edit:hover { color: var(--accent); }

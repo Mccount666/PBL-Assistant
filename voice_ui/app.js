@@ -21,6 +21,8 @@ const state = {
   starting: false,
   expandedHyps: new Set(),
   expandedKnowledge: new Set(),
+  board: [],
+  issues: [],
 };
 
 const $ = (id) => document.getElementById(id);
@@ -148,6 +150,8 @@ async function refreshAll() {
   state.team = data.team;
   state.releasedActs = data.released_acts;
   state.includeFinal = data.include_final;
+  state.board = data.board || [];
+  state.issues = data.issues || [];
   $('review-toggle').checked = state.includeFinal;
   setConn(data.engine || '');
 
@@ -323,9 +327,11 @@ function renderHyps(items) {
         ${ev.length ? '<span class="hyp-ev-count" onclick="toggleHypDetail(' + h.id + ')" title="查看依据">' + ev.length + ' 依据</span>' : ''}
         <button class="hyp-status-btn" onclick="setHypStatus(${h.id},'supported')" title="支持增强">✓</button>
         <button class="hyp-status-btn" onclick="setHypStatus(${h.id},'refuted')" title="推翻">✗</button>
+        <button class="mini-edit" onclick="editHyp(${h.id})" title="编辑措辞">✎</button>
         <button class="mini-del" onclick="deleteHyp(${h.id})" title="删除">✕</button>
       </div>
       <div class="hyp-detail hidden" id="hyp-detail-${h.id}">
+        ${renderHypTimeline(h.events)}
         <div class="hyp-ev-list">${renderEvidence(ev)}</div>
         <form class="mini-form" onsubmit="return addEvidence(event, ${h.id})">
           <input type="text" placeholder="＋ 补充依据：案例里的哪条信息支持它？" maxlength="200">
@@ -350,6 +356,19 @@ function renderEvidence(ev) {
     return '<div class="hyp-ev-empty">还没有依据 —— 补充案例里支持它的信息</div>';
   }
   return ev.map((e) => '<div class="hyp-ev-item"><span class="hyp-ev-act">第' + e.act_no + '幕</span><span>' + esc(e.note) + '</span></div>').join('');
+}
+
+function renderHypTimeline(events) {
+  // 只有状态发生过变化（>1 条事件）才展示演变轨迹
+  if (!events || events.length <= 1) return '';
+  const items = events.map((e) => {
+    const st = STATUS[e.status] || STATUS.proposed;
+    const note = (e.note && e.note !== '提出假设') ? '<span class="hyp-tl-note">' + esc(e.note) + '</span>' : '';
+    return '<div class="hyp-tl-item"><span class="hyp-tl-act">第' + e.act_no + '幕</span>'
+      + '<span class="hyp-dot ' + st.dot + '"></span>'
+      + '<span class="hyp-tl-label">' + st.label + '</span>' + note + '</div>';
+  }).join('');
+  return '<div class="hyp-timeline"><div class="hyp-tl-title">状态演变</div>' + items + '</div>';
 }
 
 function toggleHypDetail(id) {
@@ -383,6 +402,7 @@ function renderIssues(items) {
     return `<div class="issue-item">
       <input type="checkbox" class="issue-check" ${done ? 'checked' : ''} onchange="toggleIssue(${it.id},'${done ? 'open' : 'resolved'}')">
       <span class="issue-text ${done ? 'done' : ''}">${esc(text)}</span>
+      <button class="mini-edit" onclick="editIssue(${it.id})" title="编辑措辞">✎</button>
       <button class="mini-del" onclick="deleteIssue(${it.id})" title="删除">✕</button>
     </div>`;
   }).join('');
@@ -778,6 +798,28 @@ async function toggleIssue(id, status) {
 async function deleteIssue(id) {
   if (!confirm('删除该议题？')) return;
   await api('/api/issue/delete', { id });
+  await refreshAll();
+}
+
+async function editHyp(id) {
+  const h = (state.board || []).find((x) => x.id === id);
+  if (!h) return;
+  const input = prompt('编辑假设：', h.text);
+  if (input === null) return;
+  const text = input.trim();
+  if (!text || text === h.text) return;
+  await api('/api/board/edit', { id, text });
+  await refreshAll();
+}
+
+async function editIssue(id) {
+  const it = (state.issues || []).find((x) => x.id === id);
+  if (!it) return;
+  const input = prompt('编辑议题：', it.text);
+  if (input === null) return;
+  const text = input.trim();
+  if (!text || text === it.text) return;
+  await api('/api/issue/edit', { id, text });
   await refreshAll();
 }
 
