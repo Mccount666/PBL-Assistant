@@ -1504,3 +1504,130 @@ main {
   width: 6px; height: 6px; border-radius: 50%;
   background: var(--gold); flex-shrink: 0; margin-top: 6px;
 }
+
+/* ============================================================
+   白板 · 思维导图视图
+   ============================================================ */
+.pane-board { position: relative; overflow: hidden; }
+
+.board-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: rgba(12, 18, 36, 0.5);
+}
+.view-toggle {
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--bg-raise); border: 1px solid var(--border); border-radius: 10px;
+}
+.vt-btn {
+  border: none; background: transparent; color: var(--text-muted);
+  font-size: 12px; padding: 5px 14px; border-radius: 8px;
+  cursor: pointer; font-family: inherit; transition: all 0.2s ease;
+}
+.vt-btn:hover { color: var(--text-secondary); }
+.vt-btn.active { background: var(--accent-dim); color: var(--accent-light); }
+.map-controls { display: flex; gap: 6px; }
+.mc-btn {
+  width: 30px; height: 30px; border: 1px solid var(--border);
+  background: var(--bg-glass); color: var(--text-secondary);
+  border-radius: 8px; cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.2s ease; font-family: inherit;
+}
+.mc-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+.mindmap-view {
+  position: relative; flex: 1; min-height: 0; overflow: hidden; cursor: grab;
+  background:
+    radial-gradient(circle at 28% 18%, rgba(139,157,255,0.07), transparent 42%),
+    radial-gradient(circle at 74% 82%, rgba(61,220,151,0.06), transparent 42%),
+    radial-gradient(circle at 50% 50%, rgba(20,28,50,0.35), rgba(8,12,26,0.5));
+}
+.mindmap-view.mm-grabbing { cursor: grabbing; }
+#mm-svg { width: 100%; height: 100%; display: block; touch-action: none; }
+.mm-link { fill: none; stroke-width: 1.6; }
+.mm-node { cursor: pointer; }
+.mm-node rect { transition: filter 0.2s ease; }
+.mm-node:hover rect { filter: brightness(1.3); }
+.mm-root-label { fill: #EAF0FA; font-size: 14px; font-weight: 600; }
+.mm-root-sub { fill: #74839C; font-size: 9px; letter-spacing: 2px; }
+.mm-cat-label { fill: #EAF0FA; font-size: 12px; font-weight: 600; }
+.mm-cat-count { fill: #74839C; font-size: 10px; }
+.mm-leaf-label { fill: #A8B6CE; font-size: 11.5px; }
+.mm-done .mm-leaf-label { fill: #55637C; text-decoration: line-through; }
+.mm-leaf-ev { fill: #8B9DFF; font-size: 9px; }
+.mm-hl rect { stroke-width: 2.5; animation: mmPulse 1s ease-in-out 2; }
+@keyframes mmPulse { 0%, 100% { stroke-width: 1.5; } 50% { stroke-width: 3.5; } }
+.mm-hint {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; color: var(--text-faint); white-space: nowrap;
+  background: rgba(10, 14, 28, 0.72); padding: 4px 12px; border-radius: 10px;
+  pointer-events: none; border: 1px solid var(--border);
+}
+
+.board-list-view { flex: 1; min-height: 0; overflow-y: auto; }
+
+/* 主题化滚动条 */
+.board-list-view::-webkit-scrollbar, .node-detail::-webkit-scrollbar { width: 8px; }
+.board-list-view::-webkit-scrollbar-track, .node-detail::-webkit-scrollbar-track { background: transparent; }
+.board-list-view::-webkit-scrollbar-thumb, .node-detail::-webkit-scrollbar-thumb {
+  background: rgba(139,157,255,0.22); border-radius: 8px;
+}
+.board-list-view::-webkit-scrollbar-thumb:hover, .node-detail::-webkit-scrollbar-thumb:hover {
+  background: rgba(139,157,255,0.4);
+}
+
+/* 节点详情面板 */
+.node-detail {
+  position: absolute; top: 56px; right: 16px; bottom: 12px;
+  width: 300px; max-width: calc(100% - 32px); box-sizing: border-box;
+  background: rgba(16, 22, 37, 0.97);
+  border: 1px solid var(--border-light); border-radius: 14px;
+  box-shadow: var(--shadow-lg); overflow-y: auto; overflow-x: hidden; padding: 16px; z-index: 30;
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  animation: ndFade 0.22s ease;
+}
+@keyframes ndFade { from { opacity: 0; } to { opacity: 1; } }
+.nd-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.nd-kind { font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 8px; }
+.nd-kind.hypothesis { color: #8B9DFF; background: rgba(139,157,255,0.12); }
+.nd-kind.knowledge { color: #3DDC97; background: rgba(61,220,151,0.12); }
+.nd-kind.issue { color: #FCD34D; background: rgba(252,211,77,0.12); }
+.nd-kind.insight { color: #C084FC; background: rgba(192,132,252,0.12); }
+.nd-close { border: none; background: none; color: var(--text-faint); cursor: pointer; font-size: 14px; padding: 2px 6px; }
+.nd-close:hover { color: var(--text-primary); }
+.nd-title { font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.5; margin-bottom: 12px; }
+.nd-status-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.nd-status {
+  font-size: 11px; padding: 4px 10px; border-radius: 8px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+  cursor: pointer; font-family: inherit; transition: all 0.2s ease;
+}
+.nd-status:hover { color: var(--text-secondary); border-color: var(--border-light); }
+.nd-status.active.open { color: var(--amber); border-color: var(--amber); background: rgba(251,191,36,0.1); }
+.nd-status.active.confirmed { color: var(--emerald); border-color: var(--emerald); background: rgba(52,211,153,0.1); }
+.nd-status.active.rejected { color: var(--rose); border-color: var(--rose); background: rgba(244,63,94,0.1); }
+.nd-section-title { font-size: 10px; letter-spacing: 1px; color: var(--text-faint); margin: 10px 0 6px; }
+.nd-actions { display: flex; gap: 8px; margin-top: 12px; }
+.nd-danger { color: var(--rose) !important; }
+.nd-resolve { margin: 8px 0; }
+.nd-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.nd-knowledge { display: flex; flex-direction: column; gap: 6px; }
+.node-detail .mini-form { margin-top: 8px; }
+.node-detail .hyp-ev-list { margin-bottom: 4px; }
+
+/* 写进白板按钮 */
+.composer-row #write-btn {
+  background: rgba(252,211,77,0.1); color: var(--gold);
+  border: 1px solid rgba(252,211,77,0.25); font-size: 16px;
+}
+.composer-row #write-btn:hover {
+  background: rgba(252,211,77,0.2); color: var(--gold);
+  box-shadow: 0 0 16px rgba(252,211,77,0.2);
+}
+
+@media (max-width: 900px) {
+  .node-detail { top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; max-height: 55%; }
+  .mm-hint { display: none; }
+}

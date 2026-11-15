@@ -23,6 +23,10 @@ const state = {
   expandedKnowledge: new Set(),
   board: [],
   issues: [],
+  boardView: 'map',
+  openNode: null,
+  mmHighlight: null,
+  lastData: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -81,6 +85,7 @@ function showDiscuss() {
   $('picker-view').classList.add('hidden');
   $('discuss-view').classList.remove('hidden');
   if (!state.listening) $('subtitle-text').textContent = '点击左侧圆点开始聆听';
+  requestAnimationFrame(() => { if (window.MindMap && state.boardView === 'map') MindMap.fit(); });
 }
 
 /* ================= 案例选择 ================= */
@@ -226,12 +231,112 @@ function safeJson(s) {
 }
 
 function renderBoard(data) {
+  state.lastData = data;
   // 假设/议题以 hypotheses/issues 表为准；知识点与导师提示来自画布
   const canvas = data.canvas || [];
   renderInsights(canvas.filter((n) => n.type === 'insight'));
   renderKnowledge(canvas.filter((n) => n.type === 'knowledge'));
   renderHyps(data.board || []);
   renderIssues(data.issues || []);
+  if (state.boardView === 'map' && window.MindMap) {
+    MindMap.render(data, state.mmHighlight ? { highlight: state.mmHighlight } : undefined);
+    state.mmHighlight = null;
+  }
+  if (state.openNode) renderNodeDetail();
+}
+
+function setBoardView(mode) {
+  state.boardView = mode;
+  $('view-map').classList.toggle('active', mode === 'map');
+  $('view-list').classList.toggle('active', mode === 'list');
+  $('mindmap-view').classList.toggle('hidden', mode !== 'map');
+  $('board-list-view').classList.toggle('hidden', mode !== 'list');
+  $('map-controls').classList.toggle('hidden', mode !== 'map');
+  if (mode === 'map') {
+    if (window.MindMap) {
+      MindMap.reset();
+      if (state.lastData) {
+        MindMap.render(state.lastData, state.mmHighlight ? { highlight: state.mmHighlight } : undefined);
+        state.mmHighlight = null;
+      }
+    }
+  } else {
+    closeNodeDetail();
+  }
+}
+
+const NODE_KIND = { hypothesis: '假设', knowledge: '知识点', issue: '议题', insight: '导师提示' };
+
+function openNodeDetail(type, id) {
+  state.openNode = { type, id: String(id) };
+  renderNodeDetail();
+}
+
+function closeNodeDetail() {
+  state.openNode = null;
+  const panel = $('node-detail');
+  panel.classList.add('hidden');
+  panel.innerHTML = '';
+}
+
+function renderNodeDetail() {
+  const panel = $('node-detail');
+  const o = state.openNode;
+  if (!o) { panel.classList.add('hidden'); return; }
+  const d = state.lastData || {};
+  const canvas = d.canvas || [];
+  let node = null;
+  if (o.type === 'hypothesis') node = (d.board || []).find((x) => String(x.id) === o.id);
+  else if (o.type === 'issue') node = (d.issues || []).find((x) => String(x.id) === o.id);
+  else node = canvas.find((x) => x.type === o.type && String(x.id) === o.id);
+  if (!node) { closeNodeDetail(); return; }
+
+  const title = o.type === 'hypothesis' ? node.text.replace(/^假设：/, '')
+    : o.type === 'issue' ? node.text.replace(/^议题：/, '')
+    : o.type === 'insight' ? node.text.replace(/^导师：/, '') : node.text;
+  let html = `<div class="nd-head"><span class="nd-kind ${o.type}">${NODE_KIND[o.type] || ''}</span>
+    <button class="nd-close" onclick="closeNodeDetail()" title="关闭">✕</button></div>
+    <div class="nd-title">${esc(title)}</div>`;
+
+  if (o.type === 'hypothesis') {
+    const statuses = ['proposed', 'supported', 'pending', 'refuted'];
+    html += `<div class="nd-status-row">` + statuses.map((s) => {
+      const st = STATUS[s];
+      return `<button class="nd-status ${st.dot} ${node.status === s ? 'active' : ''}" onclick="setHypStatus(${node.id},'${s}')">${st.label}</button>`;
+    }).join('') + `</div>`;
+    html += `<div class="nd-section-title">依据</div><div class="hyp-ev-list">${renderEvidence(node.evidence || [])}</div>
+      <form class="mini-form" onsubmit="return addEvidence(event, ${node.id})">
+        <input type="text" placeholder="＋ 补充案例依据" maxlength="200">
+      </form>
+      <div class="nd-actions">
+        <button class="btn-text" onclick="editHyp(${node.id})">编辑</button>
+        <button class="btn-text nd-danger" onclick="deleteHyp(${node.id})">删除</button>
+      </div>`;
+  } else if (o.type === 'knowledge') {
+    const det = safeJson(node.detail);
+    const diseases = det.diseases || [], types = det.types || [], notes = det.notes || [];
+    html += `<div class="nd-knowledge">
+      ${diseases.length ? '<div class="kd-row"><span class="kd-label">相关疾病</span><span>' + diseases.map(esc).join('、') + '</span></div>' : ''}
+      ${types.length ? '<div class="kd-row"><span class="kd-label">分类分型</span><span>' + types.map(esc).join('、') + '</span></div>' : ''}
+      ${notes.length ? '<div class="kd-row"><span class="kd-label">追问要点</span><span>' + notes.map(esc).join('；') + '</span></div>' : ''}
+      ${!diseases.length && !types.length && !notes.length ? '<div class="hyp-ev-empty">暂无展开信息</div>' : ''}
+    </div>
+    <div class="nd-actions"><button class="btn-text" onclick="loadRefs(${node.id},'nd-krefs-${node.id}')">检索文献</button></div>
+    <div class="knowledge-refs-box hidden" id="nd-krefs-${node.id}"></div>`;
+  } else if (o.type === 'issue') {
+    const done = node.status === 'resolved';
+    html += `<label class="check-row nd-resolve"><input type="checkbox" ${done ? 'checked' : ''}
+      onchange="toggleIssue(${node.id},'${done ? 'open' : 'resolved'}')"> 已解决</label>
+      <div class="nd-actions">
+        <button class="btn-text" onclick="editIssue(${node.id})">编辑</button>
+        <button class="btn-text nd-danger" onclick="deleteIssue(${node.id})">删除</button>
+      </div>`;
+  } else {
+    html += `<div class="nd-text">${esc(title)}</div>`;
+  }
+
+  panel.innerHTML = html;
+  panel.classList.remove('hidden');
 }
 
 function renderInsights(items) {
@@ -294,8 +399,8 @@ function toggleKnowledge(id) {
   else state.expandedKnowledge.add(id);
 }
 
-async function loadRefs(nodeId) {
-  const box = $('krefs-' + nodeId);
+async function loadRefs(nodeId, boxId) {
+  const box = $(boxId || ('krefs-' + nodeId));
   if (!box) return;
   if (!box.classList.contains('hidden')) {
     box.classList.add('hidden');
@@ -438,11 +543,9 @@ function renderQuickActions() {
 async function acceptAction(i) {
   const a = state.pendingActions[i];
   if (!a) return;
-  if (a.type === 'add_hypothesis') await api('/api/board/add', { text: a.text });
-  else await api('/api/issue/add', { text: a.text });
   state.pendingActions.splice(i, 1);
   renderQuickActions();
-  refreshAll();
+  await sendDiscussion('写进白板：' + a.text, false, true);
 }
 
 /* ================= 语音识别（浏览器） ================= */
@@ -498,17 +601,22 @@ async function flushBuffer() {
   if (text) await sendDiscussion(text);
 }
 
-async function sendDiscussion(text, force = false) {
+async function sendDiscussion(text, force = false, forceWrite = false) {
   if (!state.token || state.thinking) return;
   state.thinking = true;
   updateMic();
-  setVoiceState('导师思考中…', '正在结合案例与画板生成回应');
+  setVoiceState(forceWrite ? '正在美化写入白板…' : '导师思考中…',
+                forceWrite ? 'AI 正基于案例整理这条内容' : '正在结合案例与画板生成回应');
 
   try {
-    const data = await api('/api/discuss', { text, force });
+    const data = await api('/api/discuss', { text, force, force_write: forceWrite });
     if (data.ok) {
       state.pendingActions = data.actions || [];
       renderQuickActions();
+      if (data.written) {
+        state.mmHighlight = data.written;
+        toast('已写进白板：' + data.written.title);
+      }
       await refreshAll();
       if (data.reply) speak(data.reply);
       else if (state.listening) setVoiceState('聆听中…', '继续讨论');
@@ -519,6 +627,14 @@ async function sendDiscussion(text, force = false) {
     state.thinking = false;
     updateMic();
   }
+}
+
+async function writeInputToBoard() {
+  const text = $('say-input').value.trim();
+  if (!text) { toast('先输入要写进白板的内容'); return; }
+  $('say-input').value = '';
+  setBoardView('map');
+  await sendDiscussion(text, false, true);
 }
 
 /* ================= TTS ================= */
@@ -609,6 +725,10 @@ function handleRealtimeEvent(msg) {
   } else if (t === 'response.audio_transcript.done') {
     rt.aiText = '';
     setVoiceState('聆听中…', '继续讨论');
+  } else if (t === 'board.updated') {
+    refreshAll();
+  } else if (t === 'conversation.item.input_audio_transcription.completed') {
+    refreshAll();
   }
 }
 
@@ -782,8 +902,7 @@ async function submitHyp(ev) {
   const text = $('hyp-input').value.trim();
   if (!text) return false;
   $('hyp-input').value = '';
-  await api('/api/board/add', { text });
-  await refreshAll();
+  await sendDiscussion('请把假设「' + text + '」写进白板', false, true);
   return false;
 }
 
@@ -792,8 +911,7 @@ async function submitIssue(ev) {
   const text = $('issue-input').value.trim();
   if (!text) return false;
   $('issue-input').value = '';
-  await api('/api/issue/add', { text });
-  await refreshAll();
+  await sendDiscussion('请把议题「' + text + '」写进白板', false, true);
   return false;
 }
 
@@ -1036,6 +1154,16 @@ async function confirmImport() {
   $('release-btn').addEventListener('click', releaseAct);
   $('export-btn').addEventListener('click', exportMinutes);
   $('settings-btn').addEventListener('click', openSettings);
+  $('write-btn').addEventListener('click', writeInputToBoard);
+  if (window.MindMap) MindMap.init();
+  setBoardView('map');
+  let mmResizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(mmResizeTimer);
+    mmResizeTimer = setTimeout(() => {
+      if (state.boardView === 'map' && window.MindMap) MindMap.fit();
+    }, 150);
+  });
   $('import-files').addEventListener('change', () => {
     $('import-confirm-btn').disabled = true;
     $('import-preview').classList.add('hidden');

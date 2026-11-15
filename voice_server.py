@@ -27,6 +27,7 @@ import json
 import time
 import uuid
 import shutil
+import asyncio
 import sqlite3
 import datetime
 import tempfile
@@ -45,6 +46,7 @@ from core.discussion_coach import DiscussionCoach
 from core.board import STATUS_LABELS, STATUS_ICONS
 from core.report import generate_minutes
 from core.llm_client import load_config, mask_key, save_config, test_connection, utility_models
+from core.board_writer import detect_write_intent, beautify_board_entry
 
 DB_PATH = ROOT / "data" / "voice.sqlite"
 REPORTS_DIR = ROOT / "reports"
@@ -328,6 +330,41 @@ def add_issue_row(conn, session_id, text, act_no):
         "INSERT INTO issues (session_id, text, status, source_act, created_at) VALUES (?,?,?,?,?)",
         (session_id, text, "open", act_no, now_str()))
     return cur.lastrowid
+
+
+def apply_board_entry(conn, session_id, entry, act_no):
+    """把 AI 美化后的节点写入白板，返回 {type,id,title} 供前端高亮。"""
+    kind = entry.get("kind")
+    if kind == "hypothesis":
+        hid = add_hypothesis_row(conn, session_id, entry["title"], act_no)
+        for note in entry.get("evidence") or []:
+            conn.execute(
+                "INSERT INTO hypothesis_evidence (hyp_id, act_no, note, created_at) VALUES (?,?,?,?)",
+                (hid, act_no, note, now_str()))
+        return {"type": "hypothesis", "id": hid, "title": entry["title"]}
+    if kind == "knowledge":
+        detail = json.dumps({
+            "diseases": entry.get("diseases") or [],
+            "types": entry.get("types") or [],
+            "notes": entry.get("notes") or [],
+        }, ensure_ascii=False)
+        dup = conn.execute(
+            "SELECT id FROM canvas_nodes WHERE session_id = ? AND type = 'knowledge' AND text = ?",
+            (session_id, entry["topic"])).fetchone()
+        if dup:
+            nid = dup["id"]
+            conn.execute("UPDATE canvas_nodes SET detail = ? WHERE id = ?", (detail, nid))
+        else:
+            cur = conn.execute(
+                "INSERT INTO canvas_nodes (session_id, type, text, detail, act_no, source, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (session_id, "knowledge", entry["topic"], detail, act_no, "ai", now_str()))
+            nid = cur.lastrowid
+        return {"type": "knowledge", "id": nid, "title": entry["topic"]}
+    if kind == "issue":
+        iid = add_issue_row(conn, session_id, entry["title"], act_no)
+        return {"type": "issue", "id": iid, "title": entry["title"]}
+    return None
 
 
 # ---------- 笔记画布 ----------
@@ -937,13 +974,7 @@ async def start(payload: dict):
         # 画布：开场笔记（只记幕次标题，不抄案例原文）
         first = case["acts"][0]
         add_canvas_node(conn, sid, "act", first["title"], 1)
-        # 画布：从第一幕正文提取医学知识点（症状/体征 → 疾病方向/分型/待明确）
-        try:
-            _cfg = load_config()
-            _topics = extract_knowledge_llm(first["presentation"], _cfg)
-            add_knowledge_nodes(conn, sid, _topics, 1)
-        except Exception:
-            pass
+        # 白板改为显式写入：不再自动提取知识点
 
         session = conn.execute("SELECT * FROM sessions WHERE id = ?", (sid,)).fetchone()
         payload = state_payload(conn, session, case)
@@ -976,13 +1007,7 @@ async def release(payload: dict):
         opening = coach.on_act_released(act)
         add_dialogue(conn, session["id"], "coach", opening, new_no)
         add_canvas_node(conn, session["id"], "act", act["title"], new_no)
-        # 画布：从这一幕正文提取医学知识点
-        try:
-            _cfg = load_config()
-            _topics = extract_knowledge_llm(act["presentation"], _cfg)
-            add_knowledge_nodes(conn, session["id"], _topics, new_no)
-        except Exception:
-            pass
+        # 白板改为显式写入：不再自动提取知识点
 
         # 新幕回顾旧假设
         board = get_board(conn, session["id"])
@@ -1001,11 +1026,13 @@ async def release(payload: dict):
 async def discuss(payload: dict):
     """
     学生讨论文本 → AI 判断是否介入 → 回复（或保持安静）。
-    payload: {token, text, force?}
+    若学生明确要求「写进白板」，则基于案例美化生成节点并写入。
+    payload: {token, text, force?, force_write?}
     """
     token = payload.get("token", "")
     text = (payload.get("text") or "").strip()[:500]
     force = bool(payload.get("force"))
+    force_write = bool(payload.get("force_write"))
     if not text:
         return {"ok": False, "error": "内容为空"}
 
@@ -1028,6 +1055,24 @@ async def discuss(payload: dict):
                 break
             if r["role"] == "student":
                 silent_streak += 1
+        recent_text = " ".join(r["content"] for r in reversed(recent)
+                               if r["role"] == "student")[-600:]
+
+        # ---- 显式写入白板：AI 基于案例美化 ----
+        write_content = detect_write_intent(text)
+        wants_write = force_write or (write_content is not None)
+        if wants_write:
+            raw = (write_content or text).strip()
+            entry = await asyncio.to_thread(
+                beautify_board_entry, case, act_no, raw, recent_text, load_config())
+            written = apply_board_entry(conn, session["id"], entry, act_no) if entry else None
+            if written:
+                reply = "已写进白板：「{}」。".format(written["title"])
+            else:
+                reply = "这条内容我没整理出可写入的节点，换个说法再试试？"
+            add_dialogue(conn, session["id"], "coach", reply, act_no)
+            return {"ok": True, "reply": reply, "actions": [],
+                    "reason": "board_write", "written": written}
 
         if force:
             intervene, reason = True, "forced"
@@ -1035,7 +1080,8 @@ async def discuss(payload: dict):
             intervene, reason = should_intervene(text, silent_streak)
 
         if not intervene:
-            return {"ok": True, "reply": None, "actions": [], "reason": reason}
+            return {"ok": True, "reply": None, "actions": [], "reason": reason,
+                    "written": None}
 
         board = get_board(conn, session["id"])
         issues = get_issues(conn, session["id"])
@@ -1048,10 +1094,9 @@ async def discuss(payload: dict):
         save_coach(conn, session["id"], coach)
         add_dialogue(conn, session["id"], "coach", reply, act_no)
 
-        # 画布：AI 把本轮讨论要点写上去
-        canvas_note_for_intervention(conn, session["id"], reply, actions, act_no)
-
-        return {"ok": True, "reply": reply, "actions": actions, "reason": reason}
+        # 白板改为显式写入，这里不再自动上板
+        return {"ok": True, "reply": reply, "actions": actions, "reason": reason,
+                "written": None}
 
 
 @app.get("/api/state")
@@ -1501,16 +1546,22 @@ async def ws_realtime(ws: WebSocket, session_token: str, model: str = "stepaudio
                     continue
                 mtype = msg.get("type", "")
 
-                # 学生语音转写完成 → 记入讨论流 + 画布提取
+                # 学生语音转写完成 → 记入讨论流；仅显式「写进白板」才上板
                 if mtype == "conversation.item.input_audio_transcription.completed":
                     text = (msg.get("transcript") or "").strip()
                     if text:
                         with db() as conn:
                             add_dialogue(conn, session_id, "student", text, act_no)
-                            canvas_note_from_speech(conn, session_id, text, act_no)
-                            # 讨论后提炼医学知识点（节流）
+                        wc = detect_write_intent(text)
+                        if wc is not None:
                             try:
-                                maybe_extract_knowledge(conn, session_id, act_no)
+                                entry = await asyncio.to_thread(
+                                    beautify_board_entry, case, act_no,
+                                    wc or text, "", load_config())
+                                if entry:
+                                    with db() as conn:
+                                        apply_board_entry(conn, session_id, entry, act_no)
+                                    await ws.send_text(json.dumps({"type": "board.updated"}))
                             except Exception:
                                 pass
                 # 导师语音回复转写完成 → 记入讨论流 + 画布笔记

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PBL 讨论助手</title>
-<link rel="stylesheet" href="/ui/style.css?v=9">
+<link rel="stylesheet" href="/ui/style.css?v=10">
 </head>
 <body>
 
@@ -96,7 +96,8 @@
             <div class="composer-sub" id="subtitle-text">点击左侧圆点开始聆听</div>
             <div class="quick-actions" id="quick-actions"></div>
             <div class="composer-row">
-              <input id="say-input" type="text" placeholder="或输入文字…">
+              <input id="say-input" type="text" placeholder="输入讨论，或说「把…写进白板」">
+              <button type="button" id="write-btn" title="把输入内容写进白板（AI 基于案例美化）">✍</button>
               <button type="submit" id="say-btn">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
@@ -109,6 +110,41 @@
 
       <!-- 右：画板 -->
       <div class="pane pane-board">
+
+        <div class="board-toolbar">
+          <div class="view-toggle">
+            <button id="view-map" class="vt-btn active" onclick="setBoardView('map')">思维导图</button>
+            <button id="view-list" class="vt-btn" onclick="setBoardView('list')">列表</button>
+          </div>
+          <div class="map-controls" id="map-controls">
+            <button class="mc-btn" onclick="MindMap.zoomOut()" title="缩小">−</button>
+            <button class="mc-btn" onclick="MindMap.zoomIn()" title="放大">＋</button>
+            <button class="mc-btn" onclick="MindMap.fit()" title="适应窗口">⤢</button>
+            <button class="mc-btn" onclick="MindMap.expandAll()" title="展开全部">⊞</button>
+          </div>
+        </div>
+
+        <div id="mindmap-view" class="mindmap-view">
+          <svg id="mm-svg" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="mmRootGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#2A3A6E"/>
+                <stop offset="1" stop-color="#1B2547"/>
+              </linearGradient>
+              <filter id="mmGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="4" result="b"/>
+                <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+              </filter>
+            </defs>
+            <g id="mm-viewport">
+              <g id="mm-links"></g>
+              <g id="mm-nodes"></g>
+            </g>
+          </svg>
+          <div class="mm-hint">拖拽平移 · 滚轮缩放 · 点分支折叠 · 点节点看详情</div>
+        </div>
+
+        <div id="board-list-view" class="board-list-view hidden">
 
         <!-- 导师提示 -->
         <div class="board-section hidden" id="insight-section">
@@ -180,6 +216,9 @@
           </div>
         </div>
 
+        </div><!-- /board-list-view -->
+
+        <div id="node-detail" class="node-detail hidden"></div>
       </div>
     </div>
   </section>
@@ -253,6 +292,7 @@
   </div>
 </div>
 
-<script src="/ui/app.js?v=11"></script>
+<script src="/ui/mindmap.js?v=3"></script>
+<script src="/ui/app.js?v=13"></script>
 </body>
 </html>
