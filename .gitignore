@@ -26,3 +26,6 @@ reports/*.docx
 Thumbs.db
 .idea/
 .vscode/
+# 备份与用量
+backups/
+data/llm_usage.jsonl

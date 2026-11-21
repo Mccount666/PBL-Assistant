@@ -22,7 +22,9 @@
 
 import os
 import json
+import time
 import socket
+import threading
 import ipaddress
 import urllib.request
 import urllib.parse
@@ -40,6 +42,8 @@ DEFAULT_CONFIG = {
     "utility_model": "",
     # 辅助模型失败时的候选列表（按顺序尝试）
     "utility_fallback_models": [],
+    # 实时语音可用模型（可配置；留空用内置默认）
+    "realtime_models": [],
     "temperature": 0.4,
     "max_tokens": 600,
     "timeout": 30,
@@ -66,6 +70,44 @@ ALLOWED_API_HOSTS = {
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            ".bedside_config.json")
+
+# token 用量记录（JSONL，线程安全追加）
+USAGE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "data", "llm_usage.jsonl")
+_usage_lock = threading.Lock()
+
+_BUILTIN_REALTIME_MODELS = [
+    "stepaudio-3-realtime-preview",
+    "stepaudio-2.5-realtime",
+    "step-1o-audio",
+    "step-audio-2",
+    "step-audio-2-mini",
+    "step-audio-r1.5",
+]
+
+
+def realtime_models(config=None):
+    """实时语音可用模型：配置优先，内置默认兜底。"""
+    cfg = config or load_config()
+    models = [m.strip() for m in (cfg.get("realtime_models") or []) if m and m.strip()]
+    return models or list(_BUILTIN_REALTIME_MODELS)
+
+
+def _record_usage(model, usage):
+    try:
+        rec = {
+            "ts": int(time.time() * 1000),
+            "model": model,
+            "prompt": usage.get("prompt_tokens"),
+            "completion": usage.get("completion_tokens"),
+            "total": usage.get("total_tokens"),
+        }
+        os.makedirs(os.path.dirname(USAGE_PATH), exist_ok=True)
+        with _usage_lock:
+            with open(USAGE_PATH, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _is_safe_url(api_base):
@@ -134,6 +176,15 @@ def load_config():
     if fallback_env:
         cfg["utility_fallback_models"] = [
             m.strip() for m in fallback_env.split(",") if m.strip()
+        ]
+
+    # 实时语音模型：环境变量（逗号分隔）或文件里的字符串统一成列表
+    rt_env = os.environ.get("BEDSIDE_REALTIME_MODELS")
+    if rt_env:
+        cfg["realtime_models"] = [m.strip() for m in rt_env.split(",") if m.strip()]
+    if isinstance(cfg.get("realtime_models"), str):
+        cfg["realtime_models"] = [
+            m.strip() for m in cfg["realtime_models"].split(",") if m.strip()
         ]
 
     # 模式有效性
@@ -208,6 +259,10 @@ def chat(system_prompt, user_prompt, config=None):
     try:
         with urllib.request.urlopen(req, timeout=cfg["timeout"]) as resp:
             body = json.loads(resp.read().decode("utf-8"))
+        try:
+            _record_usage(cfg.get("model"), body.get("usage") or {})
+        except Exception:
+            pass
         msg = body["choices"][0]["message"]
         text = (msg.get("content") or "").strip()
         # 兼容推理模型：content 为空时取 reasoning（思考过程含最终答案）
@@ -241,7 +296,8 @@ def save_config(updates):
     仅接受白名单字段，避免写入任意键。
     """
     allowed = {"mode", "api_base", "api_key", "model", "utility_model",
-               "utility_fallback_models", "temperature", "max_tokens", "timeout"}
+               "utility_fallback_models", "realtime_models",
+               "temperature", "max_tokens", "timeout"}
     cfg = {}
     if os.path.exists(CONFIG_PATH):
         try:

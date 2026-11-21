@@ -985,9 +985,21 @@ async function openSettings() {
     $('set-model').value = s.model || '';
     $('set-utility-model').value = s.utility_model || '';
     $('key-state').textContent = s.key_masked ? '已配置：' + s.key_masked : '尚未配置';
-    $('voice-mode').value = s.voice_mode || 'realtime';
-    $('tts-toggle').checked = s.tts_enabled !== false;
+    $('voice-mode').value = localStorage.getItem('pbl_voice_mode') || s.voice_mode || 'realtime';
+    const tts = localStorage.getItem('pbl_tts_enabled');
+    $('tts-toggle').checked = tts === null ? s.tts_enabled !== false : tts === '1';
   }
+  // token 用量
+  try {
+    const u = await api('/api/usage');
+    if (u.ok) {
+      const byModel = Object.entries(u.by_model || {})
+        .map(([m, v]) => m + ' ' + v.tokens).join(' · ');
+      $('usage-line').textContent =
+        'Token 用量：今日 ' + (u.today_total || 0) + ' / 累计 ' + (u.total_tokens || 0)
+        + '（' + (u.total_calls || 0) + ' 次）' + (byModel ? '　' + byModel : '');
+    }
+  } catch (e) { $('usage-line').textContent = ''; }
   $('settings-modal').classList.remove('hidden');
   $('test-result').classList.add('hidden');
 }
@@ -1005,6 +1017,10 @@ async function saveSettings() {
     voice_mode: $('voice-mode').value,
     tts_enabled: $('tts-toggle').checked,
   };
+  try {
+    localStorage.setItem('pbl_voice_mode', payload.voice_mode);
+    localStorage.setItem('pbl_tts_enabled', payload.tts_enabled ? '1' : '0');
+  } catch (e) {}
   const data = await api('/api/settings', payload);
   if (data.ok) {
     toast('设置已保存');
@@ -1184,9 +1200,14 @@ async function confirmImport() {
   $('say-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') sendSay();
   });
-  $('voice-mode').addEventListener('change', () => {
+  $('voice-mode').addEventListener('change', (e) => {
+    try { localStorage.setItem('pbl_voice_mode', e.target.value); } catch (err) {}
     if (state.listening) stopListening(true);
     setVoiceState('麦克风未开启', '点击左侧圆点开始聆听');
+  });
+  const ttsToggle = $('tts-toggle');
+  if (ttsToggle) ttsToggle.addEventListener('change', (e) => {
+    try { localStorage.setItem('pbl_tts_enabled', e.target.checked ? '1' : '0'); } catch (err) {}
   });
 
   if (state.token) {

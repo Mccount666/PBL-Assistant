@@ -45,7 +45,8 @@ from cases.case_data import PBL_CASES, KNOWLEDGE_BASE
 from core.discussion_coach import DiscussionCoach
 from core.board import STATUS_LABELS, STATUS_ICONS
 from core.report import generate_minutes
-from core.llm_client import load_config, mask_key, save_config, test_connection, utility_models
+from core.llm_client import (load_config, mask_key, save_config, test_connection,
+                             utility_models, realtime_models)
 from core.board_writer import detect_write_intent, beautify_board_entry
 from core.tutor_assist import detect_topic, is_topic_query, literature_for
 
@@ -693,6 +694,37 @@ def get_settings():
     }
 
 
+@app.get("/api/usage")
+def usage_stats():
+    """LLM token 用量汇总（今日 / 累计 / 按模型）。"""
+    path = ROOT / "data" / "llm_usage.jsonl"
+    agg = {"today_calls": 0, "today_total": 0,
+           "total_calls": 0, "total_tokens": 0, "by_model": {}}
+    if path.exists():
+        today = datetime.date.today()
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                total = rec.get("total") or 0
+                agg["total_calls"] += 1
+                agg["total_tokens"] += total
+                model = rec.get("model") or "unknown"
+                agg["by_model"].setdefault(model, {"calls": 0, "tokens": 0})
+                agg["by_model"][model]["calls"] += 1
+                agg["by_model"][model]["tokens"] += total
+                try:
+                    when = datetime.datetime.fromtimestamp(rec.get("ts", 0) / 1000).date()
+                    if when == today:
+                        agg["today_calls"] += 1
+                        agg["today_total"] += total
+                except Exception:
+                    pass
+    return {"ok": True, **agg}
+
+
 @app.post("/api/settings")
 async def post_settings(payload: dict):
     """
@@ -737,7 +769,7 @@ async def post_settings(payload: dict):
 @app.post("/api/test_connection")
 async def api_test_connection():
     """检测当前配置的 API 是否可用（发一个最小请求）。"""
-    result = test_connection()
+    result = await asyncio.to_thread(test_connection)
     return {"ok": True, "test": result, "engine": engine_label()}
 
 
@@ -1096,7 +1128,8 @@ async def discuss(payload: dict):
         board = get_board(conn, session["id"])
         issues = get_issues(conn, session["id"])
         coach = load_coach(case, session)
-        reply, actions = coach.on_student_message(
+        reply, actions = await asyncio.to_thread(
+            coach.on_student_message,
             text,
             [{"text": b["text"], "status": b["status"],
               "status_cn": STATUS_LABELS.get(b["status"], b["status"])} for b in board],
@@ -1431,7 +1464,7 @@ async def knowledge_refs(payload: dict):
     cfg = load_config()
     try:
         from core.literature import search_for_topic
-        res = search_for_topic(topic, cfg, 3)
+        res = await asyncio.to_thread(search_for_topic, topic, cfg, 3)
     except Exception as e:
         return {"ok": False, "error": "文献检索失败: {}".format(e)}
     return {"ok": True, "topic": topic, **res}
@@ -1454,11 +1487,12 @@ def literature(q: str = Query(""), limit: int = 3):
 @app.get("/api/realtime/status")
 def realtime_status():
     cfg = load_config()
+    models = realtime_models(cfg)
     return {
         "ok": True,
         "available": bool(cfg.get("api_key")),
-        "models": sorted(REALTIME_MODELS),
-        "default_model": "stepaudio-3-realtime-preview",
+        "models": sorted(models),
+        "default_model": models[0] if models else "stepaudio-3-realtime-preview",
         "hint": "需要阶跃星辰 API Key（同一 Key 同时用于文本与语音）",
     }
 
@@ -1471,7 +1505,7 @@ async def ws_realtime(ws: WebSocket, session_token: str, model: str = "stepaudio
     """
     await ws.accept()
 
-    if model not in REALTIME_MODELS:
+    if model not in set(realtime_models(load_config())):
         await ws.send_text(json.dumps({"type": "error", "error": "不支持的语音模型: " + model}))
         await ws.close()
         return
